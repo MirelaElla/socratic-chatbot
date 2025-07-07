@@ -1,6 +1,10 @@
 # socratic-chatbot
 This is an AI chatbot that uses Socratic dialogue to help students understand the key concepts of the book "Memory" by Baddeley, Anderson und Eysenck.
 
+**Experience the chatbot in action:**  
+[Launch the Socratic Chatbot live!](https://socratic-chat.streamlit.app/)
+
+### Example:
 ![Demo](assets/example.png)
 
 ## Getting started
@@ -15,5 +19,5 @@ This is an AI chatbot that uses Socratic dialogue to help students understand th
 * OpenAI's `gpt-4`
 
 # To Do
-[ ] Streaming answers
-[ ] Add a retry loop that checks if GPT drifted from the Socratic tone or topic. --> not necessary, it already stays on topic.
+- [ ] Streaming answers
+- [ ] Add a retry loop that checks if GPT drifted from the Socratic tone or topic. --> not necessary, it already stays on topic.
