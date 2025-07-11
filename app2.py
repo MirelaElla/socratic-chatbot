@@ -2,6 +2,18 @@ import streamlit as st
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
+from st_supabase_connection import SupabaseConnection, execute_query
+
+# Initialize connection.
+conn = st.connection("supabase", type=SupabaseConnection)
+
+# Perform query.
+rows = execute_query(conn.table("mytable").select("*"), ttl="10m")
+# the query result is cached for no longer than 10 minutes. You can also set ttl=0 to disable caching.
+
+# Print results.
+for row in rows.data:
+    st.write(f"{row['name']} has a :{row['pet']}:")
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))

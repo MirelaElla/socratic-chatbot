@@ -21,5 +21,7 @@ This is an AI chatbot that uses Socratic dialogue to help students understand th
 * OpenAI's `gpt-4`
 
 # To Do
+- [ ] user auth
+- [ ] user history logging
 - [ ] Streaming answers
 - [ ] Add a retry loop that checks if GPT drifted from the Socratic tone or topic. --> not necessary, it already stays on topic.
