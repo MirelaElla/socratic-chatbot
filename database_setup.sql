@@ -15,8 +15,16 @@ CREATE TABLE IF NOT EXISTS chat_history (
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
+    chat_mode VARCHAR(20) DEFAULT 'Sokrates',
+    feedback_rating INTEGER CHECK (feedback_rating IN (0, 1)),  -- 0 for thumbs down, 1 for thumbs up
+    feedback_text TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- If you already have an existing chat_history table, run these ALTER statements:
+-- ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS chat_mode VARCHAR(20) DEFAULT 'Aristoteles';
+-- ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS feedback_rating INTEGER CHECK (feedback_rating IN (0, 1));
+-- ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS feedback_text TEXT;
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_chat_history_user_id ON chat_history(user_id);
