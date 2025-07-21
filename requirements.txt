@@ -51,6 +51,7 @@ sniffio==1.3.1
 st-supabase-connection==2.1.0
 storage3==0.12.0
 streamlit==1.46.1
+streamlit-feedback==0.1.4
 StrEnum==0.4.15
 supabase==2.16.0
 supafunc==0.10.1

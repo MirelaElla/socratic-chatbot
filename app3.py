@@ -97,21 +97,28 @@ def sign_up_user(email, password):
         st.error(f"Sign up error: {e}")
         return None
 
-def save_chat_message(user_id, role, content):
-    """Save chat message to Supabase"""
+def save_chat_message(user_id, role, content, chat_mode=None):
+    """Save chat message to Supabase with chat mode"""
     # Check if session is still valid before saving
     if not check_session_validity():
         st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
         st.rerun()
         return None
     
+    # Get chat mode from session state if not provided
+    if chat_mode is None:
+        chat_mode = st.session_state.get("chat_mode", "Aristoteles")
+    
     supabase = get_supabase_client()
     try:
-        result = supabase.table("chat_history").insert({
+        data = {
             "user_id": str(user_id),  # Ensure user_id is string format
             "role": role,
-            "content": content
-        }).execute()
+            "content": content,
+            "chat_mode": chat_mode
+        }
+            
+        result = supabase.table("chat_history").insert(data).execute()
         return result
     except Exception as e:
         # Check if this is a JWT expiration error
@@ -127,31 +134,6 @@ def save_chat_message(user_id, role, content):
         else:
             st.error(f"Error saving message: {e}")
         return None
-
-def load_chat_history(user_id):
-    """Load chat history from Supabase"""
-    # Check if session is still valid before loading
-    if not check_session_validity():
-        return []
-    
-    supabase = get_supabase_client()
-    try:
-        result = supabase.table("chat_history").select("role, content").eq("user_id", str(user_id)).order("created_at").execute()
-        return [{"role": msg["role"], "content": msg["content"]} for msg in result.data]
-    except Exception as e:
-        # Check if this is a JWT expiration error
-        if "JWT expired" in str(e) or "PGRST301" in str(e):
-            st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
-            # Clear session and redirect to login
-            st.session_state.authenticated = False
-            st.session_state.user_email = None
-            st.session_state.user_id = None
-            if "messages" in st.session_state:
-                del st.session_state.messages
-            st.rerun()
-        else:
-            st.error(f"Error loading chat history: {e}")
-        return []
 
 def sign_out_user():
     """Sign out user from Supabase Auth"""
@@ -191,12 +173,40 @@ def check_session_validity():
 
 def show_login():
     """Display login form"""
-    st.image("assets/Unidistance_Logo_couleur_RVB.png", width=200)
+    
+    # Sidebar with tool information
+    with st.sidebar:
+        st.image("assets/Unidistance_Logo_couleur_RVB.png", width=200)
+        st.markdown("### 📚 About This Tool")
+        
+        with st.expander("🇺🇸 English"):
+            st.markdown("""
+            **This is a digital learning tool designed for psychology courses.**  
+            It supports students in exploring and understanding memory-related concepts from *Memory* by Baddeley et al.
+
+            **Students can choose between two chat modes:**
+
+            - **Socrates**: A guided Socratic dialogue that stimulates thinking and self-discovery through guided questions—without giving direct answers.  
+            - **Aristotle**: A direct, explanatory style that delivers direct answers and summaries to support knowledge acquisition.
+            """)
+        
+        with st.expander("🇩🇪 Deutsch"):
+            st.markdown("""
+            **Dies ist ein digitales Lerntool für psychologische Lehrveranstaltungen.**  
+            Es unterstützt Studierende dabei, gedächtnisbezogene Konzepte aus *Memory* von Baddeley et al. zu verstehen.
+
+            **Studierende können zwischen zwei Chat-Modi wählen:**
+
+            - **Sokrates**: Ein geführter sokratischer Dialog, der durch gezielte Fragen zum Denken und zur Selbstentdeckung anregt – ohne direkte Antworten zu geben.  
+            - **Aristoteles**: Ein direkter, erklärender Stil, der klare Antworten und Zusammenfassungen liefert, um den Wissenserwerb zu unterstützen.
+            """)
+    
+    # Main content
     st.title("🔐 Anmeldung erforderlich")
     st.markdown("""
     **Zugang nur für Studierende und Mitarbeitende der Universität**
     
-    Bitte geben Sie Ihre institutionelle E-Mail-Adresse ein:
+    Bitte melden Sie sich mit Ihrer institutionellen E-Mail-Adresse an:
     
     ⚠️ **Hinweis**: Ihre Sitzung läuft nach längerer Inaktivität automatisch ab. 
     Falls Sie eine Fehlermeldung bezüglich einer abgelaufenen Sitzung erhalten, melden Sie sich bitte erneut an.
@@ -293,17 +303,53 @@ def show_main_app():
         st.rerun()
         return
     
-    # App title
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        st.image("assets/Unidistance_Logo_couleur_RVB.png", width=150)
-    with col2:
-        st.markdown(f"""
-        **Angemeldet als:** {st.session_state.user_email}
+    # Sidebar for chat mode selection
+    with st.sidebar:
+        st.image("assets/Unidistance_Logo_couleur_RVB.png", width=200)
+        st.title("🎯 Chat-Modus")
         
-        *This is a digital teaching and learning tool designed for psychology courses. It helps students explore and understand memory-related concepts and relationships through guided Socratic dialogue.*
+        # Initialize chat mode in session state if not exists
+        if "chat_mode" not in st.session_state:
+            st.session_state.chat_mode = "Sokrates"
+        
+        # Chat mode selection
+        new_mode = st.radio(
+            "Wählen Sie den Chat-Modus:",
+            ["Sokrates", "Aristoteles"],
+            index=0 if st.session_state.chat_mode == "Sokrates" else 1,
+            help="**Sokrates**: Sokratischer Dialog mit lenkenden Fragen\n\n**Aristoteles**: Direkte Antworten auf Ihre Fragen"
+        )
+        
+        # Check if mode changed and clear messages if so
+        if new_mode != st.session_state.chat_mode:
+            st.session_state.chat_mode = new_mode
+            if "messages" in st.session_state:
+                st.session_state.messages = []
+            st.rerun()
+        
+        st.divider()
+        
+        # Mode descriptions
+        if st.session_state.chat_mode == "Sokrates":
+            st.markdown("""
+            **🤔 Sokratischer Dialog**
+            
+            In diesem Modus stellt der Bot lenkende Fragen, um Sie zum Nachdenken anzuregen, anstatt direkte Antworten zu geben.
+            """)
+        else:
+            st.markdown("""
+            **💬 Aristoteles-Chat**
+            
+            In diesem Modus gibt der Bot direkte, informative Antworten auf Ihre Fragen zum Buch.
+            """)
+        
+        # Login info at bottom of sidebar
+        st.divider()
+        st.markdown(f"""
+        **Angemeldet als:**  
+        {st.session_state.user_email}
         """)
-        if st.button("Abmelden", type="secondary"):
+        if st.button("Abmelden", type="secondary", use_container_width=True):
             sign_out_user()
             st.session_state.authenticated = False
             st.session_state.user_email = None
@@ -311,21 +357,34 @@ def show_main_app():
             if "messages" in st.session_state:
                 del st.session_state.messages
             st.rerun()
+    
+    # App title
+    st.title(f"{st.session_state.chat_mode} Chatbot")
 
-    st.title("💬 Chatbot zum Buch 'Memory'")
-
-    # Initialize session state for messages and load chat history
+    # Initialize session state for messages
     if "messages" not in st.session_state:
-        if hasattr(st.session_state, 'user_id') and st.session_state.user_id:
-            st.session_state.messages = load_chat_history(st.session_state.user_id)
-        else:
-            st.session_state.messages = []
+        st.session_state.messages = []
 
-    # Instruction
-    with st.expander("ℹ️ So funktioniert's:"):
-        st.markdown("""
-        Stelle eine Frage zum Buch *Memory* von Baddeley et al. und chatte mit dem Bot, um zentrale Konzepte erklärt zu bekommen.
-        """)
+    # Instruction - different content based on chat mode
+    if st.session_state.chat_mode == "Sokrates":
+        with st.expander("ℹ️ So funktioniert's:"):
+            st.markdown("""
+            Dieser Chatbot führt einen **sokratischen Dialog**, der sich ausschliesslich auf das Buch *Memory* von Baddeley et al. stützt.
+            
+            - ❌ Er gibt keine direkten Antworten
+            - 🧠 Er stellt dir Fragen, um dein Denken anzuregen
+
+            Stelle eine Frage oder nenne ein Thema, um loszulegen!
+            """)
+    else:  # Aristoteles mode
+        with st.expander("ℹ️ So funktioniert's:"):
+            st.markdown("""
+            Dieser Chatbot gibt dir **direkte Antworten** auf Fragen zum Buch *Memory* von Baddeley et al.
+            - ✅ Er liefert präzise Erklärungen und Zusammenfassungen
+            - 🧠 Er hilft dir, das Buch besser zu verstehen und dein Wissen zu festigen  
+            
+            Stelle eine Frage oder nenne ein Thema, um loszulegen!
+            """)
 
     # Chat input
     user_input = st.chat_input("Frage etwas über Gedächtnis...")
@@ -340,18 +399,27 @@ def show_main_app():
             
         st.session_state.messages.append({"role": "user", "content": user_input})
         # Save user message to database
-        save_result = save_chat_message(st.session_state.user_id, "user", user_input)
+        save_result = save_chat_message(st.session_state.user_id, "user", user_input, st.session_state.chat_mode)
         
         # If saving failed due to session expiry, don't continue with API call
         if save_result is None:
             return
 
-        # Compose full conversation
-        messages = [{"role": "system", "content": 
-            """ Du bist ein Tutor, der ausschliesslich Fragen von Studierenden zum Buch 'Memory' von Baddeley et al. beantwortet.
+        # Compose full conversation with mode-specific system prompt
+        if st.session_state.chat_mode == "Sokrates":
+            system_prompt = """
+            Du bist ein sokratischer Tutor, der sich ausschliesslich auf das Buch „Memory" von Baddeley et al. (4. Auflage) konzentriert.
+            Deine Aufgabe ist es, niemals direkt zu antworten. 
+            Stattdessen stellst du aufschlussreiche, lenkende Fragen, die dem Lernenden helfen, über das Thema nachzudenken und Antworten auf Grundlage des Buchinhalts zu finden.
+            Sei streng: Weigere dich, Fragen zu beantworten oder Gespräche fortzusetzen, die nicht den Inhalt des Buches betreffen.
+            Verwende stets sokratischen Dialog."""
+        else:  # Aristoteles mode
+            system_prompt = """
+            Du bist ein Tutor, der ausschliesslich Fragen von Studierenden zum Buch 'Memory' von Baddeley et al. beantwortet. 
             Deine Aufgabe ist es, korrekte, präzise, kurze und informative Antworten zu geben.
-            Weigere dich, Fragen zu beantworten oder Gespräche fortzusetzen, die nicht den Inhalt des Buches betreffen.
-            """}]
+            Weigere dich, Fragen zu beantworten oder Gespräche fortzusetzen, die nicht den Inhalt des Buches betreffen."""
+        
+        messages = [{"role": "system", "content": system_prompt}]
 
         for msg in st.session_state.messages:
             messages.append({"role": msg["role"], "content": msg["content"]})
@@ -366,7 +434,7 @@ def show_main_app():
             reply = response.choices[0].message.content
             st.session_state.messages.append({"role": "assistant", "content": reply})
             # Save assistant message to database
-            save_chat_message(st.session_state.user_id, "assistant", reply)
+            save_chat_message(st.session_state.user_id, "assistant", reply, st.session_state.chat_mode)
         except Exception as e:
             st.error(f"API Error: {e}")
             # Remove the user message from session if API call failed
@@ -374,7 +442,7 @@ def show_main_app():
                 st.session_state.messages.pop()
 
     # Display messages
-    for msg in st.session_state.messages:
+    for i, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
             st.chat_message("user").markdown(msg["content"])
         else:
