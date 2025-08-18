@@ -16,6 +16,22 @@ def get_supabase_client():
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
+def get_authenticated_supabase_client():
+    """Get a Supabase client with current user authentication"""
+    supabase = get_supabase_client()
+    
+    # Check if we have a valid session
+    if st.session_state.get("authenticated", False):
+        try:
+            # Get the current user to verify the session is still valid
+            user = supabase.auth.get_user()
+            if user and user.user:
+                return supabase
+        except Exception as e:
+            print(f"Auth check failed: {e}")
+            
+    return None
+
 # Page configuration
 st.set_page_config(page_title="Chatbot Memory")
 
@@ -105,16 +121,45 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
         st.rerun()
         return None
     
-    supabase = get_supabase_client()
+    supabase = get_authenticated_supabase_client()
+    if not supabase:
+        st.error("Authentifizierung fehlgeschlagen. Bitte melden Sie sich erneut an.")
+        return None
+        
     try:
+        # Debug info
+        print(f"Debug - Saving feedback for message_id: {message_id}, user_id: {st.session_state.user_id}, rating: {feedback_rating}")
+        
         # Update the specific message with feedback
         data = {
             "feedback_rating": feedback_rating,
             "feedback_text": feedback_text
         }
         
-        result = supabase.table("chat_history").update(data).eq("id", message_id).execute()
-        return result
+        # Update with explicit user context check
+        result = supabase.table("chat_history").update(data).eq("id", message_id).eq("user_id", str(st.session_state.user_id)).execute()
+        
+        # Debug the result
+        print(f"Debug - Update result: {result}")
+        print(f"Debug - Result data: {result.data}")
+        
+        # Check if the update was successful
+        if result.data and len(result.data) > 0:
+            st.success("Vielen Dank fürs Feedback!", icon="✅")
+            return result
+        else:
+            # Try without user_id filter to see if that's the issue
+            print(f"Debug - Trying update without user_id filter...")
+            result2 = supabase.table("chat_history").update(data).eq("id", message_id).execute()
+            print(f"Debug - Update without user_id filter result: {result2}")
+            
+            if result2.data and len(result2.data) > 0:
+                st.success("Feedback gespeichert (Warnung: Benutzerfilter übersprungen)!", icon="⚠️")
+                return result2
+            else:
+                st.warning(f"Nachricht mit ID {message_id} nicht gefunden oder Berechtigung verweigert.")
+                return None
+            
     except Exception as e:
         if "JWT expired" in str(e) or "PGRST301" in str(e):
             st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
@@ -128,6 +173,7 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
             st.rerun()
         else:
             st.error(f"Error saving feedback: {e}")
+            print(f"Debug - Feedback save error: {e}")  # Add debug info
         return None
 
 def save_chat_message(user_id, role, content, chat_mode=None):
@@ -142,7 +188,11 @@ def save_chat_message(user_id, role, content, chat_mode=None):
     if chat_mode is None:
         chat_mode = st.session_state.get("chat_mode", "Aristoteles")
     
-    supabase = get_supabase_client()
+    supabase = get_authenticated_supabase_client()
+    if not supabase:
+        st.error("Authentifizierung fehlgeschlagen. Bitte melden Sie sich erneut an.")
+        return None
+        
     try:
         data = {
             "user_id": str(user_id),  # Ensure user_id is string format
@@ -510,17 +560,23 @@ def show_main_app():
                     if message_id is not None:
                         def handle_feedback(feedback_data, msg_id=message_id):
                             """Handle feedback submission"""
-                            if feedback_data:
-                                # Convert thumbs to rating (👍 = 1, 👎 = 0)
-                                rating = 1 if feedback_data["score"] == "👍" else 0
-                                feedback_text = feedback_data.get("text", "").strip() if feedback_data.get("text") else None
-                                
-                                # Save feedback to database
-                                result = save_feedback(msg_id, rating, feedback_text)
-                                if result:
-                                    st.success("Vielen Dank für Ihr Feedback!", icon="✅")
-                                    return feedback_data
-                            return feedback_data
+                            try:
+                                if feedback_data:
+                                    # Convert thumbs to rating (👍 = 1, 👎 = 0)
+                                    rating = 1 if feedback_data["score"] == "👍" else 0
+                                    feedback_text = feedback_data.get("text", "").strip() if feedback_data.get("text") else None
+                                    
+                                    # Save feedback to database
+                                    result = save_feedback(msg_id, rating, feedback_text)
+                                    if result:
+                                        # Don't show success message here as it's already shown in save_feedback
+                                        return feedback_data
+                                    else:
+                                        st.error("Feedback konnte nicht gespeichert werden.")
+                                return feedback_data
+                            except Exception as e:
+                                st.error(f"Fehler beim Verarbeiten des Feedbacks: {e}")
+                                return feedback_data
                         
                         # Create feedback component with unique key
                         feedback = streamlit_feedback(
