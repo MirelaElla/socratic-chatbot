@@ -465,6 +465,10 @@ def show_main_app():
     if "message_ids" not in st.session_state:
         st.session_state.message_ids = []
 
+    # Initialize processing flag
+    if "processing_response" not in st.session_state:
+        st.session_state.processing_response = False
+
     # Instruction - different content based on chat mode
     if st.session_state.chat_mode == "Sokrates":
         with st.expander("ℹ️ So funktioniert's:"):
@@ -486,65 +490,7 @@ def show_main_app():
             Stelle eine Frage oder nenne ein Thema, um loszulegen!
             """)
 
-    # Chat input
-    user_input = st.chat_input("Frage etwas über Gedächtnis...")
-
-    # Append user input
-    if user_input:
-        # Check session validity before processing the message
-        if not check_session_validity():
-            st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
-            st.rerun()
-            return
-            
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        # Save user message to database and store the ID
-        user_message_id = save_chat_message(st.session_state.user_id, "user", user_input, st.session_state.chat_mode)
-        st.session_state.message_ids.append({"role": "user", "id": user_message_id})
-        
-        # If saving failed due to session expiry, don't continue with API call
-        if user_message_id is None:
-            return
-
-        # Compose full conversation with mode-specific system prompt
-        if st.session_state.chat_mode == "Sokrates":
-            system_prompt = """
-            Du bist ein sokratischer Tutor, der sich ausschliesslich auf das Buch „Memory" von Baddeley et al. (4. Auflage) konzentriert.
-            Deine Aufgabe ist es, niemals direkt zu antworten. 
-            Stattdessen stellst du aufschlussreiche, lenkende Fragen, die dem Lernenden helfen, über das Thema nachzudenken und Antworten auf Grundlage des Buchinhalts zu finden.
-            Sei streng: Weigere dich, Fragen zu beantworten oder Gespräche fortzusetzen, die nicht den Inhalt des Buches betreffen.
-            Verwende stets sokratischen Dialog."""
-        else:  # Aristoteles mode
-            system_prompt = """
-            Du bist ein Tutor, der ausschliesslich Fragen von Studierenden zum Buch 'Memory' von Baddeley et al. beantwortet. 
-            Deine Aufgabe ist es, korrekte, präzise, kurze und informative Antworten zu geben.
-            Weigere dich, Fragen zu beantworten oder Gespräche fortzusetzen, die nicht den Inhalt des Buches betreffen."""
-        
-        messages = [{"role": "system", "content": system_prompt}]
-
-        for msg in st.session_state.messages:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-
-        # Call OpenAI API
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=messages,
-                temperature=0.2,
-            )
-            reply = response.choices[0].message.content
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-            # Save assistant message to database and store the ID
-            assistant_message_id = save_chat_message(st.session_state.user_id, "assistant", reply, st.session_state.chat_mode)
-            st.session_state.message_ids.append({"role": "assistant", "id": assistant_message_id})
-        except Exception as e:
-            st.error(f"API Error: {e}")
-            # Remove the user message from session if API call failed
-            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-                st.session_state.messages.pop()
-                st.session_state.message_ids.pop()
-
-    # Display messages
+    # Display existing messages
     for i, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
             st.chat_message("user").markdown(msg["content"])
@@ -586,6 +532,88 @@ def show_main_app():
                             key=f"feedback_{message_id}_{i}",
                             align="flex-start"
                         )
+
+    # Show loading indicator if processing
+    if st.session_state.processing_response:
+        with st.chat_message("assistant"):
+            with st.spinner("Antwort wird generiert..."):
+                st.write("")
+
+    # Chat input
+    user_input = st.chat_input("Frage etwas über Gedächtnis...")
+
+    # Handle user input
+    if user_input and not st.session_state.processing_response:
+        # Check session validity before processing the message
+        if not check_session_validity():
+            st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
+            st.rerun()
+            return
+            
+        # Add user message immediately and rerun to display it
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        
+        # Save user message to database and store the ID
+        user_message_id = save_chat_message(st.session_state.user_id, "user", user_input, st.session_state.chat_mode)
+        st.session_state.message_ids.append({"role": "user", "id": user_message_id})
+        
+        # If saving failed due to session expiry, don't continue with API call
+        if user_message_id is None:
+            return
+
+        # Set processing flag and rerun to show user message + loading indicator
+        st.session_state.processing_response = True
+        st.rerun()
+
+    # Generate assistant response if we're in processing mode
+    if st.session_state.processing_response and st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+        
+        # Compose full conversation with mode-specific system prompt
+        if st.session_state.chat_mode == "Sokrates":
+            system_prompt = """
+            Du bist ein sokratischer Tutor, der sich ausschliesslich auf das Buch „Memory" von Baddeley et al. (4. Auflage) konzentriert.
+            Deine Aufgabe ist es, niemals direkt zu antworten. 
+            Stattdessen stellst du aufschlussreiche, lenkende Fragen, die dem Lernenden helfen, über das Thema nachzudenken und Antworten auf Grundlage des Buchinhalts zu finden.
+            Sei streng: Weigere dich, Fragen zu beantworten oder Gespräche fortzusetzen, die nicht den Inhalt des Buches betreffen.
+            Verwende stets sokratischen Dialog."""
+        else:  # Aristoteles mode
+            system_prompt = """
+            Du bist ein Tutor, der ausschliesslich Fragen von Studierenden zum Buch 'Memory' von Baddeley et al. beantwortet. 
+            Deine Aufgabe ist es, korrekte, präzise, kurze und informative Antworten zu geben.
+            Weigere dich, Fragen zu beantworten oder Gespräche fortzusetzen, die nicht den Inhalt des Buches betreffen."""
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        for msg in st.session_state.messages:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+        # Call OpenAI API
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=messages,
+                temperature=0.2
+            )
+            reply = response.choices[0].message.content
+            
+            # Add assistant response
+            st.session_state.messages.append({"role": "assistant", "content": reply})
+            
+            # Save assistant message to database and store the ID
+            assistant_message_id = save_chat_message(st.session_state.user_id, "assistant", reply, st.session_state.chat_mode)
+            st.session_state.message_ids.append({"role": "assistant", "id": assistant_message_id})
+            
+            # Clear processing flag and rerun to show the response
+            st.session_state.processing_response = False
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"API Error: {e}")
+            # Clear processing flag and remove user message if API call failed
+            st.session_state.processing_response = False
+            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                st.session_state.messages.pop()
+                st.session_state.message_ids.pop()
+            st.rerun()
 
 # Check authentication status
 if "authenticated" not in st.session_state:

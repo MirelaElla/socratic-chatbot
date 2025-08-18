@@ -38,6 +38,6 @@ Run the SQL commands in `database_setup.sql` in your Supabase SQL editor to set 
 # To Do
 - [x] user auth
 - [x] user history logging  
-- [ ] User feedback system
+- [x] User feedback system
 - [ ] Streaming answers
 - [ ] Analytics dashboard for feedback data
