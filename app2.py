@@ -127,9 +127,6 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
         return None
         
     try:
-        # Debug info
-        print(f"Debug - Saving feedback for message_id: {message_id}, user_id: {st.session_state.user_id}, rating: {feedback_rating}")
-        
         # Update the specific message with feedback
         data = {
             "feedback_rating": feedback_rating,
@@ -139,26 +136,13 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
         # Update with explicit user context check
         result = supabase.table("chat_history").update(data).eq("id", message_id).eq("user_id", str(st.session_state.user_id)).execute()
         
-        # Debug the result
-        print(f"Debug - Update result: {result}")
-        print(f"Debug - Result data: {result.data}")
-        
         # Check if the update was successful
         if result.data and len(result.data) > 0:
             st.success("Vielen Dank fürs Feedback!", icon="✅")
             return result
         else:
-            # Try without user_id filter to see if that's the issue
-            print(f"Debug - Trying update without user_id filter...")
-            result2 = supabase.table("chat_history").update(data).eq("id", message_id).execute()
-            print(f"Debug - Update without user_id filter result: {result2}")
-            
-            if result2.data and len(result2.data) > 0:
-                st.success("Feedback gespeichert (Warnung: Benutzerfilter übersprungen)!", icon="⚠️")
-                return result2
-            else:
-                st.warning(f"Nachricht mit ID {message_id} nicht gefunden oder Berechtigung verweigert.")
-                return None
+            st.warning(f"Nachricht mit ID {message_id} nicht gefunden oder Berechtigung verweigert.")
+            return None
             
     except Exception as e:
         if "JWT expired" in str(e) or "PGRST301" in str(e):
@@ -173,7 +157,7 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
             st.rerun()
         else:
             st.error(f"Error saving feedback: {e}")
-            print(f"Debug - Feedback save error: {e}")  # Add debug info
+            print(f"Feedback save error: {e}")  # Log error for monitoring
         return None
 
 def save_chat_message(user_id, role, content, chat_mode=None):
@@ -533,12 +517,6 @@ def show_main_app():
                             align="flex-start"
                         )
 
-    # Show loading indicator if processing
-    if st.session_state.processing_response:
-        with st.chat_message("assistant"):
-            with st.spinner("Antwort wird generiert..."):
-                st.write("")
-
     # Chat input
     user_input = st.chat_input("Frage etwas über Gedächtnis...")
 
@@ -586,30 +564,59 @@ def show_main_app():
         for msg in st.session_state.messages:
             messages.append({"role": msg["role"], "content": msg["content"]})
 
-        # Call OpenAI API
+        # Call OpenAI API with streaming
         try:
+            # Initialize streaming response
+            st.session_state.streaming_response = True
+            st.session_state.current_response = ""
+            
             response = client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
-                temperature=0.2
+                temperature=0.2,
+                stream=True  # Enable streaming
             )
-            reply = response.choices[0].message.content
             
-            # Add assistant response
-            st.session_state.messages.append({"role": "assistant", "content": reply})
+            # Process streaming response in the same container as the loading indicator
+            # The loading indicator will be automatically replaced by this content
+            full_response = ""
+            
+            # Create a single response container that replaces the loading spinner
+            with st.chat_message("assistant"):
+                response_placeholder = st.empty()
+                
+                for chunk in response:
+                    if chunk.choices[0].delta.content is not None:
+                        chunk_content = chunk.choices[0].delta.content
+                        full_response += chunk_content
+                        
+                        # Update the display in real-time with typing cursor
+                        response_placeholder.markdown(full_response + "▋")
+                        
+                        # Small delay to make streaming visible
+                        import time
+                        time.sleep(0.01)
+                
+                # Final update without cursor
+                response_placeholder.markdown(full_response)
+            
+            # Add complete assistant response to session state
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
             
             # Save assistant message to database and store the ID
-            assistant_message_id = save_chat_message(st.session_state.user_id, "assistant", reply, st.session_state.chat_mode)
+            assistant_message_id = save_chat_message(st.session_state.user_id, "assistant", full_response, st.session_state.chat_mode)
             st.session_state.message_ids.append({"role": "assistant", "id": assistant_message_id})
             
-            # Clear processing flag and rerun to show the response
+            # Clear processing and streaming flags
             st.session_state.processing_response = False
+            st.session_state.streaming_response = False
             st.rerun()
             
         except Exception as e:
             st.error(f"API Error: {e}")
-            # Clear processing flag and remove user message if API call failed
+            # Clear all flags and remove user message if API call failed
             st.session_state.processing_response = False
+            st.session_state.streaming_response = False
             if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
                 st.session_state.messages.pop()
                 st.session_state.message_ids.pop()
