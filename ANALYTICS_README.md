@@ -41,12 +41,21 @@ SUPABASE_KEY = "your_supabase_key"
 ```
 
 ### 3. Admin Access
-The dashboard requires admin authentication. Users with emails ending in:
-- `@unidistance.ch`
-- `@fernuni.ch`
-- `@admin.local` (for testing)
+The dashboard requires admin authentication based on user roles in the database:
 
-Can access the dashboard using their regular Supabase credentials.
+- Users must have a valid account in the Supabase authentication system
+- Only users with `role = 'admin'` in the `profiles` table can access the dashboard
+- Admin role assignment must be done through the database or by existing admins
+
+**Setting up admin users:**
+1. User must first register/login to the main chatbot application
+2. An existing admin can update the user's role in the profiles table:
+   ```sql
+   UPDATE public.profiles 
+   SET role = 'admin' 
+   WHERE id = 'user_uuid_here';
+   ```
+3. The user can then access the analytics dashboard with their regular credentials
 
 ## Running the Dashboard
 
@@ -62,7 +71,8 @@ You can integrate this as part of a multi-page Streamlit app. Create a `pages/` 
 
 ### 1. Login
 - Navigate to the dashboard URL
-- Enter your admin credentials (university email + password)
+- Enter your email and password (same credentials used for the main chatbot)
+- System will verify you have admin role in the profiles table
 - Click "Login" to access the dashboard
 
 ### 2. Dashboard Navigation
@@ -98,7 +108,8 @@ You can integrate this as part of a multi-page Streamlit app. Create a `pages/` 
 
 ### 1. Admin Access Only
 - Dashboard requires authenticated admin access
-- Uses same authentication system as main app
+- Uses role-based access control via profiles table
+- Only users with admin role can access the dashboard
 - No public access to sensitive user data
 
 ### 2. Data Anonymization
@@ -116,9 +127,10 @@ You can integrate this as part of a multi-page Streamlit app. Create a `pages/` 
 ### Common Issues
 
 #### 1. Authentication Fails
-- Ensure your email domain is whitelisted
-- Check Supabase credentials
-- Verify user exists in auth.users table
+- Ensure you have a valid user account in the system
+- Check that your role is set to 'admin' in the profiles table
+- Verify Supabase credentials are correct
+- Contact an existing admin to update your role if needed
 
 #### 2. No Data Displayed
 - Check if chat_history table has data
@@ -148,7 +160,45 @@ chat_history:
 - feedback_rating (INTEGER: 0 or 1)
 - feedback_text (TEXT)
 - created_at (TIMESTAMP WITH TIME ZONE)
+
+profiles:
+- id (UUID PRIMARY KEY, references auth.users)
+- role (TEXT: 'admin', 'student', or 'tester')
 ```
+
+**Note**: The profiles table is required for admin authentication. Users must have `role = 'admin'` to access the dashboard.
+
+## Admin User Management
+
+### Creating Admin Users
+1. **User Registration**: User must first create an account through the main chatbot application
+2. **Role Assignment**: Update the user's role in the profiles table:
+   ```sql
+   UPDATE public.profiles 
+   SET role = 'admin' 
+   WHERE id = 'user_uuid_here';
+   ```
+3. **Verification**: User can now access the analytics dashboard
+
+### Managing Admin Access
+- **View All Users**: Query the profiles table to see all users and their roles
+  ```sql
+  SELECT p.id, p.role, u.email 
+  FROM public.profiles p 
+  JOIN auth.users u ON p.id = u.id;
+  ```
+- **Revoke Admin Access**: Change role back to 'student'
+  ```sql
+  UPDATE public.profiles 
+  SET role = 'student' 
+  WHERE id = 'user_uuid_here';
+  ```
+
+### Security Considerations
+- Admin role grants access to all user data in the analytics dashboard
+- Only assign admin role to trusted users
+- Regularly audit admin user list
+- Consider implementing role expiration for temporary admin access
 
 ## Customization
 

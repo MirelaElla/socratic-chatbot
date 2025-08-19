@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
-import re
 from dotenv import load_dotenv
 from supabase import create_client
 import os
@@ -28,11 +27,18 @@ def get_supabase_client():
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
-def is_valid_email(email):
-    """Check if email is valid and ends with allowed domains for admin access"""
-    # Allow admin access for university domains and specific admin emails
-    pattern = r'^[a-zA-Z0-9._%+-]+@(unidistance\.ch|fernuni\.ch|admin\.local)$'
-    return re.match(pattern, email) is not None
+def check_admin_role(user_id):
+    """Check if user has admin role in the profiles table"""
+    try:
+        supabase = get_supabase_client()
+        response = supabase.table("profiles").select("role").eq("id", user_id).execute()
+        
+        if response.data and len(response.data) > 0:
+            return response.data[0]["role"] == "admin"
+        return False
+    except Exception as e:
+        st.error(f"Error checking admin role: {e}")
+        return False
 
 def create_demo_data():
     """Create demo data for testing when no real data is available"""
@@ -105,19 +111,21 @@ def create_demo_data():
     return pd.DataFrame(demo_data)
 
 def authenticate_admin(email, password):
-    """Simple admin authentication - in production, use proper admin roles"""
-    # For demo purposes, allow demo login
-    if email == "demo@admin.local" and password == "demo":
-        return {"email": email, "id": "demo-user"}
-    
+    """Authenticate admin users with proper role validation"""
     try:
         supabase = get_supabase_client()
         response = supabase.auth.sign_in_with_password({
             "email": email,
             "password": password
         })
-        if response.user and is_valid_email(email):
-            return response.user
+        
+        if response.user:
+            # Check if user has admin role in profiles table
+            if check_admin_role(response.user.id):
+                return response.user
+            else:
+                st.error("❌ Access denied: Admin role required")
+                return None
         else:
             return None
     except Exception as e:
@@ -264,19 +272,10 @@ def show_admin_login():
     """Display admin login form"""
     st.title("🔐 Analytics Dashboard - Admin Access")
     st.markdown("Please enter your administrator credentials to access the analytics dashboard.")
-    
-    # Demo credentials info
-    with st.expander("🧪 Demo Access (for testing)"):
-        st.code("""
-Demo Credentials:
-Email: demo@admin.local
-Password: demo
-
-This will show demo data for testing purposes.
-        """)
+    st.info("ℹ️ Only users with admin role in the system can access this dashboard.")
     
     with st.form("admin_login"):
-        email = st.text_input("Admin Email", placeholder="admin@unidistance.ch")
+        email = st.text_input("Admin Email", placeholder="admin@example.com")
         password = st.text_input("Password", type="password")
         submit = st.form_submit_button("Login")
         
@@ -286,6 +285,7 @@ This will show demo data for testing purposes.
                 if user:
                     st.session_state.admin_authenticated = True
                     st.session_state.admin_email = email
+                    st.session_state.admin_user_id = user.id
                     st.success("✅ Successfully logged in!")
                     st.rerun()
                 else:
@@ -302,6 +302,8 @@ def show_dashboard():
     if st.sidebar.button("🚪 Logout"):
         st.session_state.admin_authenticated = False
         st.session_state.admin_email = None
+        if 'admin_user_id' in st.session_state:
+            st.session_state.admin_user_id = None
         st.rerun()
     
     # Fetch data
