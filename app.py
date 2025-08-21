@@ -133,8 +133,8 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
             "feedback_text": feedback_text
         }
         
-        # Update with explicit user context check
-        result = supabase.table("chat_history").update(data).eq("id", message_id).eq("user_id", str(st.session_state.user_id)).execute()
+        # Update chat_messages table instead of chat_history
+        result = supabase.table("chat_messages").update(data).eq("id", message_id).execute()
         
         # Check if the update was successful
         if result.data and len(result.data) > 0:
@@ -154,23 +154,20 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
                 del st.session_state.messages
             if "message_ids" in st.session_state:
                 del st.session_state.message_ids
+            if "current_chat_id" in st.session_state:
+                del st.session_state.current_chat_id
             st.rerun()
         else:
             st.error(f"Error saving feedback: {e}")
             print(f"Feedback save error: {e}")  # Log error for monitoring
         return None
 
-def save_chat_message(user_id, role, content, chat_mode=None):
-    """Save chat message to Supabase with chat mode"""
-    # Check if session is still valid before saving
+def create_new_chat(user_id, mode):
+    """Create a new chat session"""
     if not check_session_validity():
         st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
         st.rerun()
         return None
-    
-    # Get chat mode from session state if not provided
-    if chat_mode is None:
-        chat_mode = st.session_state.get("chat_mode", "Aristoteles")
     
     supabase = get_authenticated_supabase_client()
     if not supabase:
@@ -179,13 +176,51 @@ def save_chat_message(user_id, role, content, chat_mode=None):
         
     try:
         data = {
-            "user_id": str(user_id),  # Ensure user_id is string format
+            "user_id": str(user_id),
+            "mode": mode
+        }
+        
+        result = supabase.table("chats").insert(data).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]["id"]
+        return None
+    except Exception as e:
+        if "JWT expired" in str(e) or "PGRST301" in str(e):
+            st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
+            st.session_state.authenticated = False
+            st.session_state.user_email = None
+            st.session_state.user_id = None
+            if "messages" in st.session_state:
+                del st.session_state.messages
+            if "message_ids" in st.session_state:
+                del st.session_state.message_ids
+            if "current_chat_id" in st.session_state:
+                del st.session_state.current_chat_id
+            st.rerun()
+        else:
+            st.error(f"Error creating new chat: {e}")
+        return None
+
+def save_chat_message(chat_id, role, content):
+    """Save chat message to the new chat_messages table"""
+    if not check_session_validity():
+        st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
+        st.rerun()
+        return None
+    
+    supabase = get_authenticated_supabase_client()
+    if not supabase:
+        st.error("Authentifizierung fehlgeschlagen. Bitte melden Sie sich erneut an.")
+        return None
+        
+    try:
+        data = {
+            "chat_id": chat_id,
             "role": role,
-            "content": content,
-            "chat_mode": chat_mode
+            "content": content
         }
             
-        result = supabase.table("chat_history").insert(data).execute()
+        result = supabase.table("chat_messages").insert(data).execute()
         # Return the inserted record's ID if successful
         if result.data and len(result.data) > 0:
             return result.data[0]["id"]
@@ -198,10 +233,13 @@ def save_chat_message(user_id, role, content, chat_mode=None):
             st.session_state.authenticated = False
             st.session_state.user_email = None
             st.session_state.user_id = None
+            st.session_state.user_id = None
             if "messages" in st.session_state:
                 del st.session_state.messages
             if "message_ids" in st.session_state:
                 del st.session_state.message_ids
+            if "current_chat_id" in st.session_state:
+                del st.session_state.current_chat_id
             st.rerun()
         else:
             st.error(f"Error saving message: {e}")
@@ -235,6 +273,8 @@ def check_session_validity():
                 del st.session_state.messages
             if "message_ids" in st.session_state:
                 del st.session_state.message_ids
+            if "current_chat_id" in st.session_state:
+                del st.session_state.current_chat_id
             return False
     except Exception as e:
         # Session is invalid or expired
@@ -245,6 +285,8 @@ def check_session_validity():
             del st.session_state.messages
         if "message_ids" in st.session_state:
             del st.session_state.message_ids
+        if "current_chat_id" in st.session_state:
+            del st.session_state.current_chat_id
         return False
 
 def show_login():
@@ -264,6 +306,8 @@ def show_login():
 
             - **Socrates**: A guided Socratic dialogue that stimulates thinking and self-discovery through guided questions—without giving direct answers.  
             - **Aristotle**: A direct, explanatory style that delivers direct answers and summaries to support knowledge acquisition.
+            
+            **Disclaimer:** We do not guarantee the correctness of the chat output.
             """)
         
         with st.expander("🇩🇪 Deutsch"):
@@ -275,6 +319,8 @@ def show_login():
 
             - **Sokrates**: Ein geführter sokratischer Dialog, der durch gezielte Fragen zum Denken und zur Selbstentdeckung anregt – ohne direkte Antworten zu geben.  
             - **Aristoteles**: Ein direkter, erklärender Stil, der klare Antworten und Zusammenfassungen liefert, um den Wissenserwerb zu unterstützen.
+            
+            **Haftungsausschluss:** Wir übernehmen keine Gewähr für die Richtigkeit der Chat-Ausgaben.
             """)
     
     # Main content
@@ -371,54 +417,43 @@ def show_login():
                 else:
                     st.error("❌ Bitte füllen Sie alle Felder aus.")
 
-def show_main_app():
-    """Display the main chatbot application"""
-    # Check session validity at the start of main app
+def show_mode_selection():
+    """Display mode selection interface"""
+    # Check session validity at the start
     if not check_session_validity():
         st.error("Ihre Sitzung ist abgelaufen. Sie werden zur Anmeldung weitergeleitet.")
         st.rerun()
         return
     
-    # Sidebar for chat mode selection
+    # Sidebar with user info
     with st.sidebar:
         st.image("assets/Unidistance_Logo_couleur_RVB.png", width=200)
-        st.title("🎯 Chat-Modus")
+        st.markdown("### 📚 About This Tool")
         
-        # Initialize chat mode in session state if not exists
-        if "chat_mode" not in st.session_state:
-            st.session_state.chat_mode = "Sokrates"
-        
-        # Chat mode selection
-        new_mode = st.radio(
-            "Wählen Sie den Chat-Modus:",
-            ["Sokrates", "Aristoteles"],
-            index=0 if st.session_state.chat_mode == "Sokrates" else 1,
-            help="**Sokrates**: Sokratischer Dialog mit lenkenden Fragen\n\n**Aristoteles**: Direkte Antworten auf Ihre Fragen"
-        )
-        
-        # Check if mode changed and clear messages if so
-        if new_mode != st.session_state.chat_mode:
-            st.session_state.chat_mode = new_mode
-            if "messages" in st.session_state:
-                st.session_state.messages = []
-            if "message_ids" in st.session_state:
-                st.session_state.message_ids = []
-            st.rerun()
-        
-        st.divider()
-        
-        # Mode descriptions
-        if st.session_state.chat_mode == "Sokrates":
+        with st.expander("🇺🇸 English"):
             st.markdown("""
-            **🤔 Sokratischer Dialog**
+            **This is a digital learning tool designed for psychology courses.**  
+            It supports students in exploring and understanding memory-related concepts from *Memory* by Baddeley et al.
+
+            **Students can choose between two chat modes:**
+
+            - **Socrates**: A guided Socratic dialogue that stimulates thinking and self-discovery through guided questions—without giving direct answers.  
+            - **Aristotle**: A direct, explanatory style that delivers direct answers and summaries to support knowledge acquisition.
             
-            In diesem Modus stellt der Bot lenkende Fragen, um Sie zum Nachdenken anzuregen, anstatt direkte Antworten zu geben.
+            **Disclaimer:** We do not guarantee the correctness of the chat output.
             """)
-        else:
+        
+        with st.expander("🇩🇪 Deutsch"):
             st.markdown("""
-            **💬 Aristoteles-Chat**
+            **Dies ist ein digitales Lerntool für psychologische Lehrveranstaltungen.**  
+            Es unterstützt Studierende dabei, gedächtnisbezogene Konzepte aus *Memory* von Baddeley et al. zu verstehen.
+
+            **Studierende können zwischen zwei Chat-Modi wählen:**
+
+            - **Sokrates**: Ein geführter sokratischer Dialog, der durch gezielte Fragen zum Denken und zur Selbstentdeckung anregt – ohne direkte Antworten zu geben.  
+            - **Aristoteles**: Ein direkter, erklärender Stil, der klare Antworten und Zusammenfassungen liefert, um den Wissenserwerb zu unterstützen.
             
-            In diesem Modus gibt der Bot direkte, informative Antworten auf Ihre Fragen zum Buch.
+            **Haftungsausschluss:** Wir übernehmen keine Gewähr für die Richtigkeit der Chat-Ausgaben.
             """)
         
         # Login info at bottom of sidebar
@@ -436,6 +471,126 @@ def show_main_app():
                 del st.session_state.messages
             if "message_ids" in st.session_state:
                 del st.session_state.message_ids
+            if "current_chat_id" in st.session_state:
+                del st.session_state.current_chat_id
+            st.rerun()
+    
+    # Main content - Mode selection
+    st.title("🎯 Chat-Modus wählen")
+    st.markdown("""
+    Wählen Sie den gewünschten Chat-Modus für Ihre neue Unterhaltung:
+    """)
+    
+    # Mode selection cards
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        ### 🤔 Sokrates
+        **Sokratischer Dialog**
+        
+        In diesem Modus stellt der Bot lenkende Fragen, anstatt direkte Antworten zu geben.
+        
+        ✅ Fördert kritisches Denken  
+        ✅ Selbstentdeckung durch Fragen  
+        ✅ Vertieftes Verständnis
+        """)
+        
+        if st.button("🤔 Sokrates wählen", type="primary", use_container_width=True):
+            # Create new chat with Sokrates mode
+            chat_id = create_new_chat(st.session_state.user_id, "Sokrates")
+            if chat_id:
+                st.session_state.current_chat_id = chat_id
+                st.session_state.chat_mode = "Sokrates"
+                st.session_state.messages = []
+                st.session_state.message_ids = []
+                st.rerun()
+    
+    with col2:
+        st.markdown("""
+        ### 💬 Aristoteles
+        **Direkter Chat**
+        
+        In diesem Modus gibt der Bot direkte, informative Antworten auf Ihre Fragen zum Buch.
+        
+        ✅ Klare, direkte Antworten  
+        ✅ Informative Erklärungen  
+        ✅ Schneller Wissenserwerb
+        """)
+        
+        if st.button("💬 Aristoteles wählen", type="primary", use_container_width=True):
+            # Create new chat with Aristoteles mode
+            chat_id = create_new_chat(st.session_state.user_id, "Aristoteles")
+            if chat_id:
+                st.session_state.current_chat_id = chat_id
+                st.session_state.chat_mode = "Aristoteles"
+                st.session_state.messages = []
+                st.session_state.message_ids = []
+                st.rerun()
+
+def show_main_app():
+    """Display the main chatbot application"""
+    # Check session validity at the start of main app
+    if not check_session_validity():
+        st.error("Ihre Sitzung ist abgelaufen. Sie werden zur Anmeldung weitergeleitet.")
+        st.rerun()
+        return
+    
+    # Check if we have a current chat session
+    if "current_chat_id" not in st.session_state or st.session_state.current_chat_id is None:
+        # No chat session, show mode selection
+        show_mode_selection()
+        return
+    
+    # Sidebar for chat controls
+    with st.sidebar:
+        st.image("assets/Unidistance_Logo_couleur_RVB.png", width=200)
+        st.title(f"🎯 {st.session_state.chat_mode}")
+        
+        # Mode description
+        if st.session_state.chat_mode == "Sokrates":
+            st.markdown("""
+            **🤔 Sokratischer Dialog**
+            
+            In diesem Modus stellt der Bot lenkende Fragen, um Sie zum Nachdenken anzuregen, anstatt direkte Antworten zu geben.
+            """)
+        else:
+            st.markdown("""
+            **💬 Aristoteles-Chat**
+            
+            In diesem Modus gibt der Bot direkte, informative Antworten auf Ihre Fragen zum Buch.
+            """)
+        
+        st.divider()
+        
+        # Start new chat button
+        if st.button("🆕 Neuen Chat starten", type="secondary", use_container_width=True):
+            # Clear current chat session
+            st.session_state.current_chat_id = None
+            st.session_state.chat_mode = None
+            if "messages" in st.session_state:
+                del st.session_state.messages
+            if "message_ids" in st.session_state:
+                del st.session_state.message_ids
+            st.rerun()
+        
+        # Login info at bottom of sidebar
+        st.divider()
+        st.markdown(f"""
+        **Angemeldet als:**  
+        {st.session_state.user_email}
+        """)
+        if st.button("Abmelden", type="secondary", use_container_width=True):
+            sign_out_user()
+            st.session_state.authenticated = False
+            st.session_state.user_email = None
+            st.session_state.user_id = None
+            if "messages" in st.session_state:
+                del st.session_state.messages
+            if "message_ids" in st.session_state:
+                del st.session_state.message_ids
+            if "current_chat_id" in st.session_state:
+                del st.session_state.current_chat_id
             st.rerun()
     
     # App title
@@ -532,7 +687,7 @@ def show_main_app():
         st.session_state.messages.append({"role": "user", "content": user_input})
         
         # Save user message to database and store the ID
-        user_message_id = save_chat_message(st.session_state.user_id, "user", user_input, st.session_state.chat_mode)
+        user_message_id = save_chat_message(st.session_state.current_chat_id, "user", user_input)
         st.session_state.message_ids.append({"role": "user", "id": user_message_id})
         
         # If saving failed due to session expiry, don't continue with API call
@@ -604,7 +759,7 @@ def show_main_app():
             st.session_state.messages.append({"role": "assistant", "content": full_response})
             
             # Save assistant message to database and store the ID
-            assistant_message_id = save_chat_message(st.session_state.user_id, "assistant", full_response, st.session_state.chat_mode)
+            assistant_message_id = save_chat_message(st.session_state.current_chat_id, "assistant", full_response)
             st.session_state.message_ids.append({"role": "assistant", "id": assistant_message_id})
             
             # Clear processing and streaming flags
@@ -640,6 +795,8 @@ if st.session_state.authenticated:
             del st.session_state.messages
         if "message_ids" in st.session_state:
             del st.session_state.message_ids
+        if "current_chat_id" in st.session_state:
+            del st.session_state.current_chat_id
 
 # Show appropriate interface based on authentication
 if not st.session_state.authenticated:

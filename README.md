@@ -29,7 +29,9 @@ This is an AI chatbot that uses Socratic dialogue to help students understand th
 
 ## Database Setup
 Run the SQL commands in `database_setup.sql` in your Supabase SQL editor to set up the required tables:
-- `chat_history`: Stores user conversations with feedback ratings and text
+- `user_profiles`: Links to auth.users with user roles (admin, student, tester)
+- `chats`: Tracks individual chat sessions with mode selection (Sokrates/Aristoteles)
+- `chat_messages`: Stores individual messages within chat sessions
 - Includes feedback columns: `feedback_rating` (0/1 for thumbs down/up) and `feedback_text`
 
 ## Models used
@@ -40,4 +42,6 @@ Run the SQL commands in `database_setup.sql` in your Supabase SQL editor to set 
 - [x] user history logging  
 - [x] User feedback system
 - [x] Streaming answers
-- [ ] Analytics dashboard for feedback data
+- [ ] Analytics dashboard for feedback data (adjust to new DB structure, review SQL syntax)
+- [ ] Improve system prompt for socrates chat to be more helpful (less fixed on the book)
+- [ ] Fix registration issue (e-mail is not sent after registration)

@@ -1,5 +1,12 @@
-# Analytics Dashboard - Setup and Usage Guide
+# Analytics Dashboard - Setup and Usage### 3. Environment Configuration
+The dashboard uses the same Supabase configuration as the main chatbot app. Ensure your `.streamlit/secrets.toml` file contains:
 
+```toml
+SUPABASE_URL = "your_supabase_url"
+SUPABASE_KEY = "your_supabase_key"
+```
+
+### 4. Admin Access
 ## Overview
 The analytics dashboard provides comprehensive insights into the Socratic Chatbot usage, including user engagement, chat mode preferences, feedback ratings, and usage patterns.
 
@@ -32,7 +39,12 @@ pip install -r requirements.txt
 The new requirement added:
 - `plotly==5.24.1` - For interactive charts and visualizations
 
-### 2. Environment Configuration
+### 2. Database Setup
+**Important**: Run the new database schema first:
+1. Execute `database_setup.sql` in your Supabase SQL editor
+2. (Optional but recommended) Execute `analytics_function.sql` for optimized data queries
+
+### 3. Environment Configuration
 The dashboard uses the same Supabase configuration as the main chatbot app. Ensure your `.streamlit/secrets.toml` file contains:
 
 ```toml
@@ -44,15 +56,15 @@ SUPABASE_KEY = "your_supabase_key"
 The dashboard requires admin authentication based on user roles in the database:
 
 - Users must have a valid account in the Supabase authentication system
-- Only users with `role = 'admin'` in the `profiles` table can access the dashboard
+- Only users with `user_role = 'admin'` in the `user_profiles` table can access the dashboard
 - Admin role assignment must be done through the database or by existing admins
 
 **Setting up admin users:**
 1. User must first register/login to the main chatbot application
-2. An existing admin can update the user's role in the profiles table:
+2. An existing admin can update the user's role in the user_profiles table:
    ```sql
-   UPDATE public.profiles 
-   SET role = 'admin' 
+   UPDATE public.user_profiles 
+   SET user_role = 'admin' 
    WHERE id = 'user_uuid_here';
    ```
 3. The user can then access the analytics dashboard with their regular credentials
@@ -128,14 +140,15 @@ You can integrate this as part of a multi-page Streamlit app. Create a `pages/` 
 
 #### 1. Authentication Fails
 - Ensure you have a valid user account in the system
-- Check that your role is set to 'admin' in the profiles table
+- Check that your role is set to 'admin' in the user_profiles table
 - Verify Supabase credentials are correct
 - Contact an existing admin to update your role if needed
 
 #### 2. No Data Displayed
-- Check if chat_history table has data
+- Check if chat_messages and chats tables have data
 - Verify database connection
 - Check for proper table permissions
+- Ensure analytics_function.sql has been run if using RPC queries
 
 #### 3. Charts Not Loading
 - Ensure plotly is installed correctly
@@ -151,46 +164,60 @@ You can integrate this as part of a multi-page Streamlit app. Create a `pages/` 
 The dashboard expects the following table structure:
 
 ```sql
-chat_history:
+user_profiles:
+- id (UUID PRIMARY KEY, references auth.users)
+- user_role (TEXT: 'admin', 'student', or 'tester')
+- created_at (TIMESTAMP WITH TIME ZONE)
+
+chats:
 - id (SERIAL PRIMARY KEY)
-- user_id (UUID)
+- user_id (UUID, references auth.users)
+- mode (VARCHAR: 'Sokrates' or 'Aristoteles')
+- created_at (TIMESTAMP WITH TIME ZONE)
+
+chat_messages:
+- id (SERIAL PRIMARY KEY)
+- chat_id (INTEGER, references chats.id)
 - role (VARCHAR: 'user' or 'assistant')
 - content (TEXT)
-- chat_mode (VARCHAR: 'Sokrates' or 'Aristoteles')
 - feedback_rating (INTEGER: 0 or 1)
 - feedback_text (TEXT)
 - created_at (TIMESTAMP WITH TIME ZONE)
-
-profiles:
-- id (UUID PRIMARY KEY, references auth.users)
-- role (TEXT: 'admin', 'student', or 'tester')
 ```
 
-**Note**: The profiles table is required for admin authentication. Users must have `role = 'admin'` to access the dashboard.
+**Note**: The user_profiles table is required for admin authentication. Users must have `user_role = 'admin'` to access the dashboard.
+
+### Analytics SQL Function (Recommended)
+For better performance, add this SQL function to your Supabase database:
+
+```sql
+-- Run analytics_function.sql in your Supabase SQL editor
+-- This provides optimized data retrieval for the dashboard
+```
 
 ## Admin User Management
 
 ### Creating Admin Users
 1. **User Registration**: User must first create an account through the main chatbot application
-2. **Role Assignment**: Update the user's role in the profiles table:
+2. **Role Assignment**: Update the user's role in the user_profiles table:
    ```sql
-   UPDATE public.profiles 
-   SET role = 'admin' 
+   UPDATE public.user_profiles 
+   SET user_role = 'admin' 
    WHERE id = 'user_uuid_here';
    ```
 3. **Verification**: User can now access the analytics dashboard
 
 ### Managing Admin Access
-- **View All Users**: Query the profiles table to see all users and their roles
+- **View All Users**: Query the user_profiles table to see all users and their roles
   ```sql
-  SELECT p.id, p.role, u.email 
-  FROM public.profiles p 
+  SELECT p.id, p.user_role, u.email 
+  FROM public.user_profiles p 
   JOIN auth.users u ON p.id = u.id;
   ```
 - **Revoke Admin Access**: Change role back to 'student'
   ```sql
-  UPDATE public.profiles 
-  SET role = 'student' 
+  UPDATE public.user_profiles 
+  SET user_role = 'student' 
   WHERE id = 'user_uuid_here';
   ```
 

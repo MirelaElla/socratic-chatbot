@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import numpy as np
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
@@ -28,87 +27,17 @@ def get_supabase_client():
     return create_client(url, key)
 
 def check_admin_role(user_id):
-    """Check if user has admin role in the profiles table"""
+    """Check if user has admin role in the user_profiles table"""
     try:
         supabase = get_supabase_client()
-        response = supabase.table("profiles").select("role").eq("id", user_id).execute()
+        response = supabase.table("user_profiles").select("user_role").eq("id", user_id).execute()
         
         if response.data and len(response.data) > 0:
-            return response.data[0]["role"] == "admin"
+            return response.data[0]["user_role"] == "admin"
         return False
     except Exception as e:
         st.error(f"Error checking admin role: {e}")
         return False
-
-def create_demo_data():
-    """Create demo data for testing when no real data is available"""
-    from datetime import datetime, timedelta
-    import uuid
-    
-    # Generate demo data
-    demo_data = []
-    
-    # Create some demo users
-    user_ids = [str(uuid.uuid4()) for _ in range(10)]
-    
-    # Generate demo interactions over the last 30 days
-    start_date = datetime.now() - timedelta(days=30)
-    
-    for i in range(100):  # 100 demo messages
-        user_id = np.random.choice(user_ids)
-        chat_mode = np.random.choice(['Sokrates', 'Aristoteles'], p=[0.6, 0.4])
-        role = np.random.choice(['user', 'assistant'])
-        
-        # Create timestamp within last 30 days
-        days_ago = np.random.randint(0, 30)
-        hours_ago = np.random.randint(0, 24)
-        timestamp = start_date + timedelta(days=days_ago, hours=hours_ago)
-        
-        # Generate content
-        if role == 'user':
-            content = np.random.choice([
-                "What is working memory?",
-                "How does the phonological loop work?",
-                "Can you explain episodic memory?",
-                "What are the differences between short-term and long-term memory?",
-                "How does memory consolidation work?"
-            ])
-            feedback_rating = None
-            feedback_text = None
-        else:
-            content = np.random.choice([
-                "Let me help you understand working memory by asking you this question...",
-                "Working memory is a crucial cognitive system that...",
-                "The phonological loop is one component of working memory that...",
-                "Episodic memory refers to our ability to recall specific events...",
-                "Memory consolidation is the process by which..."
-            ])
-            # Some assistant messages have feedback
-            if np.random.random() < 0.3:  # 30% feedback rate
-                feedback_rating = np.random.choice([0, 1], p=[0.2, 0.8])  # 80% positive
-                feedback_text = np.random.choice([
-                    "Very helpful explanation!",
-                    "Could be clearer",
-                    "Perfect, thank you!",
-                    "I need more details",
-                    None
-                ]) if np.random.random() < 0.5 else None
-            else:
-                feedback_rating = None
-                feedback_text = None
-        
-        demo_data.append({
-            'id': i + 1,
-            'user_id': user_id,
-            'role': role,
-            'content': content,
-            'chat_mode': chat_mode,
-            'feedback_rating': feedback_rating,
-            'feedback_text': feedback_text,
-            'created_at': timestamp.isoformat()
-        })
-    
-    return pd.DataFrame(demo_data)
 
 def authenticate_admin(email, password):
     """Authenticate admin users with proper role validation"""
@@ -120,7 +49,7 @@ def authenticate_admin(email, password):
         })
         
         if response.user:
-            # Check if user has admin role in profiles table
+            # Check if user has admin role in user_profiles table
             if check_admin_role(response.user.id):
                 return response.user
             else:
@@ -134,24 +63,62 @@ def authenticate_admin(email, password):
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def fetch_analytics_data():
-    """Fetch all analytics data from the database"""
+    """Fetch all analytics data from the new database structure"""
     supabase = get_supabase_client()
     
     try:
-        # Fetch chat history data
-        chat_response = supabase.table("chat_history").select("*").execute()
-        chat_data = pd.DataFrame(chat_response.data) if chat_response.data else pd.DataFrame()
+        # Fetch data from the new structure with JOINs to get comprehensive data
+        query = """
+        SELECT 
+            cm.id,
+            cm.chat_id,
+            cm.role,
+            cm.content,
+            cm.feedback_rating,
+            cm.feedback_text,
+            cm.created_at,
+            c.user_id,
+            c.mode as chat_mode
+        FROM chat_messages cm
+        JOIN chats c ON cm.chat_id = c.id
+        ORDER BY cm.created_at DESC
+        """
         
-        # If no real data, create demo data for testing
-        if chat_data.empty:
-            st.info("🔄 No real data found. Showing demo data for testing purposes.")
-            chat_data = create_demo_data()
+        # Execute the query using Supabase RPC or direct query
+        try:
+            # Try using a direct query first
+            response = supabase.rpc('get_analytics_data').execute()
+            if response.data:
+                chat_data = pd.DataFrame(response.data)
+            else:
+                # Fallback to separate queries if RPC doesn't exist
+                raise Exception("RPC not found, using fallback")
+        except:
+            # Fallback: Fetch data separately and join in Python
+            chats_response = supabase.table("chats").select("id, user_id, mode, created_at").execute()
+            messages_response = supabase.table("chat_messages").select("*").execute()
+            
+            if chats_response.data and messages_response.data:
+                chats_df = pd.DataFrame(chats_response.data)
+                messages_df = pd.DataFrame(messages_response.data)
+                
+                # Join the data
+                chat_data = messages_df.merge(
+                    chats_df[['id', 'user_id', 'mode']], 
+                    left_on='chat_id', 
+                    right_on='id', 
+                    suffixes=('', '_chat')
+                )
+                chat_data = chat_data.rename(columns={'mode': 'chat_mode'})
+                chat_data = chat_data.drop(columns=['id_chat'])
+            else:
+                chat_data = pd.DataFrame()
         
+        # Return data (empty if no data found)
         return chat_data
     except Exception as e:
         st.error(f"Error fetching data: {e}")
-        st.info("🔄 Using demo data due to connection error.")
-        return create_demo_data()
+        return pd.DataFrame()
 
 def calculate_user_metrics(df):
     """Calculate user-related metrics"""
