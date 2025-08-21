@@ -44,4 +44,4 @@ Run the SQL commands in `database_setup.sql` in your Supabase SQL editor to set 
 - [x] Streaming answers
 - [ ] Analytics dashboard for feedback data (adjust to new DB structure, review SQL syntax)
 - [ ] Improve system prompt for socrates chat to be more helpful (less fixed on the book)
-- [ ] Fix registration issue (e-mail is not sent after registration)
+- [x] Registration issue: Outlook puts the confirmation email into quarantine. --> remove verification step

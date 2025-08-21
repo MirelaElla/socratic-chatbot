@@ -411,7 +411,7 @@ def show_login():
                     else:
                         user = sign_up_user(signup_email, signup_password)
                         if user:
-                            st.success("✅ Account erfolgreich erstellt! Bitte überprüfen Sie Ihre E-Mail zur Bestätigung, dann können Sie sich anmelden.")
+                            st.success("✅ Account erfolgreich erstellt! Sie können sich nun anmelden.")
                         else:
                             st.error("❌ Fehler beim Erstellen des Accounts. Möglicherweise existiert die E-Mail bereits.")
                 else:
