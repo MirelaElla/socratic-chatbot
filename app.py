@@ -37,7 +37,7 @@ st.set_page_config(page_title="Chatbot Memory")
 
 def is_valid_email(email):
     """Check if email is valid and ends with allowed domains"""
-    pattern = r'^[a-zA-Z0-9._%+-]+@(unidistance\.ch|fernuni\.ch)$'
+    pattern = r'^[a-zA-Z0-9._%+-]+@(unidistance\.ch|fernuni\.ch|stu\.unidistance\.ch|stu\.fernuni\.ch)$'
     return re.match(pattern, email) is not None
 
 def authenticate_user(email, password):
@@ -350,7 +350,7 @@ def show_login():
             email = st.text_input(
                 "E-Mail-Adresse", 
                 placeholder="vorname.nachname@unidistance.ch",
-                help="Nur E-Mail-Adressen mit @unidistance.ch oder @fernuni.ch sind zugelassen",
+                help="Nur E-Mail-Adressen der Universität sind zugelassen",
                 key="login_email"
             )
             password = st.text_input(
@@ -374,7 +374,7 @@ def show_login():
                     else:
                         st.error("❌ Ungültige Anmeldedaten. Bitte überprüfen Sie E-Mail und Passwort.")
                 elif email and not is_valid_email(email):
-                    st.error("❌ Ungültige E-Mail-Adresse. Bitte verwenden Sie eine @unidistance.ch oder @fernuni.ch Adresse.")
+                    st.error("❌ Ungültige E-Mail-Adresse. Bitte verwenden Sie eine Adresse mit @stu.unidistance.ch, @stu.fernuni.ch, @unidistance.ch, oder @fernuni.ch.")
                 else:
                     st.error("❌ Bitte füllen Sie alle Felder aus.")
     
@@ -384,7 +384,7 @@ def show_login():
             signup_email = st.text_input(
                 "E-Mail-Adresse", 
                 placeholder="vorname.nachname@unidistance.ch",
-                help="Nur E-Mail-Adressen mit @unidistance.ch oder @fernuni.ch sind zugelassen",
+                help="Nur E-Mail-Adressen der Universität sind zugelassen",
                 key="signup_email"
             )
             signup_password = st.text_input(
@@ -403,7 +403,7 @@ def show_login():
             if submit_signup:
                 if signup_email and signup_password and confirm_password:
                     if not is_valid_email(signup_email):
-                        st.error("❌ Ungültige E-Mail-Adresse. Bitte verwenden Sie eine @unidistance.ch oder @fernuni.ch Adresse.")
+                        st.error("❌ Ungültige E-Mail-Adresse. Bitte verwenden Sie eine Adresse mit @stu.unidistance.ch, @stu.fernuni.ch, @unidistance.ch, oder @fernuni.ch.")
                     elif len(signup_password) < 6:
                         st.error("❌ Passwort muss mindestens 6 Zeichen lang sein.")
                     elif signup_password != confirm_password:
