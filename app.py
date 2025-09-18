@@ -299,10 +299,10 @@ def show_login():
         
         with st.expander("🇺🇸 English"):
             st.markdown("""
-            **This is a digital learning tool designed for psychology courses.**  
+            This is a digital learning tool designed for psychology courses.
             It supports students in exploring and understanding memory-related concepts from *Memory* by Baddeley et al.
 
-            **Students can choose between two chat modes:**
+            Students can choose between two chat modes:
 
             - **Socrates**: A guided Socratic dialogue that stimulates thinking and self-discovery through guided questions—without giving direct answers.  
             - **Aristotle**: A direct, explanatory style that delivers direct answers and summaries to support knowledge acquisition.
@@ -312,15 +312,29 @@ def show_login():
         
         with st.expander("🇩🇪 Deutsch"):
             st.markdown("""
-            **Dies ist ein digitales Lerntool für psychologische Lehrveranstaltungen.**  
+            Dies ist ein digitales Lerntool für psychologische Lehrveranstaltungen.  
             Es unterstützt Studierende dabei, gedächtnisbezogene Konzepte aus *Memory* von Baddeley et al. zu verstehen.
 
-            **Studierende können zwischen zwei Chat-Modi wählen:**
+            Studierende können zwischen zwei Chat-Modi wählen:
 
             - **Sokrates**: Ein geführter sokratischer Dialog, der durch gezielte Fragen zum Denken und zur Selbstentdeckung anregt – ohne direkte Antworten zu geben.  
             - **Aristoteles**: Ein direkter, erklärender Stil, der klare Antworten und Zusammenfassungen liefert, um den Wissenserwerb zu unterstützen.
             
             **Haftungsausschluss:** Wir übernehmen keine Gewähr für die Richtigkeit der Chat-Ausgaben.
+            """)
+
+        with st.expander("🇫🇷 Français"):
+            st.markdown("""
+            Ceci est un outil d'apprentissage conçu pour les cours de psychologie.
+            Il aide les étudiants à explorer et à comprendre les concepts liés à la mémoire, tirés de *Memory* de Baddeley et al.
+            
+            Les étudiants peuvent choisir entre deux modes de chat:
+            
+            - **Socrate**: Un dialogue socratique guidé qui stimule la réflexion et l'auto-découverte à travers des questions guidées - sans donner de réponses directes.
+                        
+            - **Aristote**: Un style explicatif qui fournit des réponses directes et des résumés pour faciliter l'acquisition de connaissances.
+
+            **Avertissement**: Nous ne garantissons pas l'exactitude des réponses du chatbot.
             """)
     
     # Main content
@@ -432,28 +446,42 @@ def show_mode_selection():
         
         with st.expander("🇺🇸 English"):
             st.markdown("""
-            **This is a digital learning tool designed for psychology courses.**  
+            This is a digital learning tool designed for psychology courses.
             It supports students in exploring and understanding memory-related concepts from *Memory* by Baddeley et al.
 
-            **Students can choose between two chat modes:**
+            Students can choose between two chat modes:
 
             - **Socrates**: A guided Socratic dialogue that stimulates thinking and self-discovery through guided questions—without giving direct answers.  
             - **Aristotle**: A direct, explanatory style that delivers direct answers and summaries to support knowledge acquisition.
             
-            **Disclaimer:** We do not guarantee the correctness of the chat output.
+            **Disclaimer**: We do not guarantee the correctness of the chat output.
             """)
         
         with st.expander("🇩🇪 Deutsch"):
             st.markdown("""
-            **Dies ist ein digitales Lerntool für psychologische Lehrveranstaltungen.**  
+            Dies ist ein digitales Lerntool für psychologische Lehrveranstaltungen. 
             Es unterstützt Studierende dabei, gedächtnisbezogene Konzepte aus *Memory* von Baddeley et al. zu verstehen.
 
-            **Studierende können zwischen zwei Chat-Modi wählen:**
+            Studierende können zwischen zwei Chat-Modi wählen:
 
             - **Sokrates**: Ein geführter sokratischer Dialog, der durch gezielte Fragen zum Denken und zur Selbstentdeckung anregt – ohne direkte Antworten zu geben.  
             - **Aristoteles**: Ein direkter, erklärender Stil, der klare Antworten und Zusammenfassungen liefert, um den Wissenserwerb zu unterstützen.
             
-            **Haftungsausschluss:** Wir übernehmen keine Gewähr für die Richtigkeit der Chat-Ausgaben.
+            **Haftungsausschluss**: Wir übernehmen keine Gewähr für die Richtigkeit der Chat-Ausgaben.
+            """)
+
+        with st.expander("🇫🇷 Français"):
+            st.markdown("""
+            Ceci est un outil d'apprentissage conçu pour les cours de psychologie.
+            Il aide les étudiants à explorer et à comprendre les concepts liés à la mémoire, tirés de *Memory* de Baddeley et al.
+            
+            Les étudiants peuvent choisir entre deux modes de chat:
+            
+            - **Socrate**: Un dialogue socratique guidé qui stimule la réflexion et l'auto-découverte à travers des questions guidées - sans donner de réponses directes.
+                        
+            - **Aristote**: Un style explicatif qui fournit des réponses directes et des résumés pour faciliter l'acquisition de connaissances.
+
+            **Avertissement**: Nous ne garantissons pas l'exactitude des réponses du chatbot.
             """)
         
         # Login info at bottom of sidebar
