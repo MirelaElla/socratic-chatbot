@@ -33,15 +33,34 @@ CREATE TRIGGER on_auth_user_created
 -- Enable Row Level Security for user_profiles
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
 
+-- Create a function to check if current user is admin (bypasses RLS)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM user_profiles 
+        WHERE id = auth.uid() AND user_role = 'admin'
+    );
+$$;
+
 -- Create policies for user_profiles table
 CREATE POLICY "Users can view own profile" ON public.user_profiles
     FOR SELECT USING (auth.uid() = id);
 
+-- Allow admins to view all user profiles (needed for analytics dashboard)
+CREATE POLICY "Admins can view all profiles" ON public.user_profiles
+    FOR SELECT 
+    TO authenticated 
+    USING (public.is_admin());
+
 CREATE POLICY "Admins can update user roles" ON public.user_profiles
     FOR UPDATE 
     TO authenticated 
-    USING ((SELECT user_role FROM public.user_profiles WHERE id = auth.uid()) = 'admin')
-    WITH CHECK ((SELECT user_role FROM public.user_profiles WHERE id = auth.uid()) = 'admin');
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
 
 -- 2. Create chats table to track chat sessions
 CREATE TABLE IF NOT EXISTS public.chats (
@@ -57,6 +76,12 @@ ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
 -- Create policies for chats table
 CREATE POLICY "Users can view own chats" ON public.chats
     FOR SELECT USING (auth.uid() = user_id);
+
+-- Allow admins to view all chats (needed for analytics dashboard)
+CREATE POLICY "Admins can view all chats" ON public.chats
+    FOR SELECT 
+    TO authenticated 
+    USING (public.is_admin());
 
 CREATE POLICY "Users can insert own chats" ON public.chats
     FOR INSERT WITH CHECK (auth.uid() = user_id);
@@ -85,6 +110,12 @@ CREATE POLICY "Users can view messages from own chats" ON public.chat_messages
         )
     );
 
+-- Allow admins to view all chat messages (needed for analytics dashboard)
+CREATE POLICY "Admins can view all chat messages" ON public.chat_messages
+    FOR SELECT 
+    TO authenticated 
+    USING (public.is_admin());
+
 CREATE POLICY "Users can insert messages to own chats" ON public.chat_messages
     FOR INSERT WITH CHECK (
         EXISTS (
@@ -108,6 +139,9 @@ CREATE POLICY "Users can update own chat messages" ON public.chat_messages
             AND chats.user_id = auth.uid()
         )
     );
+
+-- Grant execute permission on the is_admin function
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_user_profiles_user_id ON public.user_profiles(id);
