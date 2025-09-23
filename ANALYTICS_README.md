@@ -1,12 +1,5 @@
-# Analytics Dashboard - Setup and Usage### 3. Environment Configuration
-The dashboard uses the same Supabase configuration as the main chatbot app. Ensure your `.streamlit/secrets.toml` file contains:
+# Analytics Dashboard - Setup and Usage
 
-```toml
-SUPABASE_URL = "your_supabase_url"
-SUPABASE_KEY = "your_supabase_key"
-```
-
-### 4. Admin Access
 ## Overview
 The analytics dashboard provides comprehensive insights into the Socratic Chatbot usage, including user engagement, chat mode preferences, feedback ratings, and usage patterns.
 
@@ -26,7 +19,7 @@ The analytics dashboard provides comprehensive insights into the Socratic Chatbo
 4. **Feedback Analysis**: User satisfaction metrics
 5. **User Engagement**: Detailed user behavior analysis
 6. **Recent Activity**: Latest interactions overview
-7. **Data Export**: Download analytics summaries
+7. **Data Export**: Download raw data and summary report
 
 ## Setup Instructions
 
@@ -41,8 +34,8 @@ The new requirement added:
 
 ### 2. Database Setup
 **Important**: Run the new database schema first:
-1. Execute `database_setup.sql` in your Supabase SQL editor
-2. (Optional but recommended) Execute `analytics_function.sql` for optimized data queries
+1. Execute `database_setup.sql` in Supabase SQL editor
+2. Execute `analytics_function.sql` in Supabase SQL editor for data queries
 
 ### 3. Environment Configuration
 The dashboard uses the same Supabase configuration as the main chatbot app. Ensure your `.streamlit/secrets.toml` file contains:
@@ -187,14 +180,6 @@ chat_messages:
 
 **Note**: The user_profiles table is required for admin authentication. Users must have `user_role = 'admin'` to access the dashboard.
 
-### Analytics SQL Function (Recommended)
-For better performance, add this SQL function to your Supabase database:
-
-```sql
--- Run analytics_function.sql in your Supabase SQL editor
--- This provides optimized data retrieval for the dashboard
-```
-
 ## Admin User Management
 
 ### Creating Admin Users
@@ -227,45 +212,7 @@ For better performance, add this SQL function to your Supabase database:
 - Regularly audit admin user list
 - Consider implementing role expiration for temporary admin access
 
-## Customization
-
-### Adding New Metrics
-To add new analytics:
-
-1. **Update Data Fetching**: Modify `fetch_analytics_data()`
-2. **Create Calculation Function**: Add new metric calculation
-3. **Update Dashboard**: Add visualization in `show_dashboard()`
-4. **Update Export**: Include in CSV export
-
-### Styling and Branding
-- Modify color schemes in plotly charts
-- Update page config and titles
-- Add custom CSS for branding
-
-### Performance Optimization
+## Performance Optimization
 - Adjust caching TTL in `@st.cache_data(ttl=300)`
 - Add data filtering options
 - Implement pagination for large datasets
-
-## Future Enhancements
-
-### Potential Features
-- **Real-time Updates**: Live dashboard updates
-- **Email Reports**: Automated weekly/monthly reports
-- **Advanced Filtering**: Date ranges, user segments
-- **Comparative Analysis**: Period-over-period comparisons
-- **Predictive Analytics**: Usage forecasting
-- **A/B Testing**: Compare different prompts or features
-
-### Integration Ideas
-- **Learning Management System**: Connect with university LMS
-- **Student Information System**: Link with student records (anonymized)
-- **Research Tools**: Export data for academic research
-- **Alert System**: Notifications for unusual patterns
-
-## Support
-For issues or questions:
-1. Check this README first
-2. Review error logs in terminal
-3. Check Supabase dashboard for data issues
-4. Contact system administrator

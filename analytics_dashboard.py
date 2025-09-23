@@ -63,86 +63,41 @@ def authenticate_admin(email, password):
         return None
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def fetch_analytics_data():
-    """Fetch all analytics data including user profiles"""
+def fetch_comprehensive_data():
+    """Fetch all data in one comprehensive query"""
     supabase = get_supabase_client()
     
     try:
-        # Fetch user profiles data for registration statistics
-        # Try using the new SQL function first, which bypasses RLS
-        try:
-            users_response = supabase.rpc('get_all_user_profiles').execute()
-            user_profiles_data = pd.DataFrame(users_response.data) if users_response.data else pd.DataFrame()
-        except:
-            # Fallback to direct table query (will be limited by RLS)
-            users_response = supabase.table("user_profiles").select("id, user_role, created_at").execute()
-            user_profiles_data = pd.DataFrame(users_response.data) if users_response.data else pd.DataFrame()
+        # Execute the RPC function to get comprehensive analytics data
+        response = supabase.rpc('get_comprehensive_analytics_data').execute()
         
-        # Fetch chat data from the new structure with JOINs to get comprehensive data
-        # The SQL function now returns created_at_local
+        if response.data:
+            df = pd.DataFrame(response.data)
+        else:
+            st.error("No data returned from analytics function. Please contact administrator.")
+            return pd.DataFrame()
         
-        # Execute the query using Supabase RPC or direct query
-        try:
-            # Try using a direct query first
-            response = supabase.rpc('get_analytics_data').execute()
-            if response.data:
-                chat_data = pd.DataFrame(response.data)
-            else:
-                # Fallback to separate queries if RPC doesn't exist
-                raise Exception("RPC not found, using fallback")
-        except Exception as e:
-            # Fallback: Fetch data separately and join in Python
-            chats_response = supabase.table("chats").select("id, user_id, mode, created_at").execute()
-            messages_response = supabase.table("chat_messages").select("*").execute()
+        # Data preprocessing
+        if not df.empty:
+            # Convert timestamps to datetime
+            timestamp_columns = ['profile_created_at', 'chat_created_at', 'message_created_at']
+            for col in timestamp_columns:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col])
             
-            if chats_response.data and messages_response.data:
-                chats_df = pd.DataFrame(chats_response.data)
-                messages_df = pd.DataFrame(messages_response.data)
-                
-                # Join the data
-                chat_data = messages_df.merge(
-                    chats_df[['id', 'user_id', 'mode']], 
-                    left_on='chat_id', 
-                    right_on='id', 
-                    suffixes=('', '_chat')
-                )
-                chat_data = chat_data.rename(columns={'mode': 'chat_mode'})
-                chat_data = chat_data.drop(columns=['id_chat'])
-            else:
-                chat_data = pd.DataFrame()
+            # Create local timezone column for message timestamps
+            if 'message_created_at' in df.columns:
+                df['message_created_at_local'] = pd.to_datetime(df['message_created_at']).dt.tz_convert('Europe/Zurich').dt.tz_localize(None)
         
-        # Add user_role information to chat_data if both datasets are available
-        if not chat_data.empty and not user_profiles_data.empty:
-            chat_data = chat_data.merge(
-                user_profiles_data[['id', 'user_role']], 
-                left_on='user_id', 
-                right_on='id', 
-                how='left',
-                suffixes=('', '_profile')
-            )
-            chat_data = chat_data.drop(columns=['id_profile'])
+        return df
         
-        # Ensure created_at_local exists and is properly converted to datetime
-        if not chat_data.empty:
-            if 'created_at_local' not in chat_data.columns:
-                # Convert created_at to local timezone (Europe/Zurich)
-                try:
-                    chat_data['created_at_local'] = pd.to_datetime(chat_data['created_at']).dt.tz_convert('Europe/Zurich').dt.tz_localize(None)
-                except Exception:
-                    # If created_at is naive, localize to UTC first
-                    chat_data['created_at_local'] = pd.to_datetime(chat_data['created_at']).dt.tz_localize('UTC').dt.tz_convert('Europe/Zurich').dt.tz_localize(None)
-            else:
-                # Ensure created_at_local is datetime type, not string
-                chat_data['created_at_local'] = pd.to_datetime(chat_data['created_at_local'])
-        
-        return chat_data, user_profiles_data
     except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return pd.DataFrame(), pd.DataFrame()
+        st.error(f"Error fetching comprehensive data: {e}")
+        return pd.DataFrame()
 
-def calculate_user_profile_metrics(user_profiles_df):
-    """Calculate metrics from user_profiles table"""
-    if user_profiles_df.empty:
+def get_user_registration_metrics(df):
+    """Calculate user registration metrics from comprehensive DataFrame"""
+    if df.empty:
         return {
             'total_registered': 0,
             'students': 0,
@@ -151,8 +106,11 @@ def calculate_user_profile_metrics(user_profiles_df):
             'role_breakdown': {}
         }
     
-    total_registered = len(user_profiles_df)
-    role_counts = user_profiles_df['user_role'].value_counts()
+    # Get unique users with their roles
+    user_data = df[['user_id', 'user_role']].drop_duplicates()
+    
+    total_registered = len(user_data)
+    role_counts = user_data['user_role'].value_counts()
     
     return {
         'total_registered': total_registered,
@@ -162,42 +120,42 @@ def calculate_user_profile_metrics(user_profiles_df):
         'role_breakdown': role_counts.to_dict()
     }
 
-def calculate_student_chat_metrics(chat_df, user_profiles_df):
-    """Calculate chat metrics specifically for student users"""
-    if chat_df.empty or user_profiles_df.empty:
+def get_student_chat_metrics(df):
+    """Calculate student-specific chat metrics"""
+    if df.empty:
         return {
             'students_who_chatted': 0,
             'total_students': 0,
             'avg_messages_per_student': 0.0,
+            'avg_messages_per_active_student': 0.0,
             'student_chat_participation_rate': 0.0
         }
     
-    # Get all student user IDs
-    student_users = user_profiles_df[user_profiles_df['user_role'] == 'student']['id'].tolist()
-    total_students = len(student_users)
+    # Get all students
+    students_df = df[df['user_role'] == 'student']
+    unique_students = students_df[['user_id', 'user_role']].drop_duplicates()
+    total_students = len(unique_students)
     
-    # Filter chat data to only student users
-    student_chat_df = chat_df[chat_df['user_id'].isin(student_users)]
+    # Get students who have chat messages (user messages only)
+    student_user_messages = students_df[
+        (students_df['message_id'].notna()) & 
+        (students_df['message_role'] == 'user')
+    ]
     
-    if student_chat_df.empty:
+    if student_user_messages.empty:
         return {
             'students_who_chatted': 0,
             'total_students': total_students,
             'avg_messages_per_student': 0.0,
+            'avg_messages_per_active_student': 0.0,
             'student_chat_participation_rate': 0.0
         }
     
-    # Count unique students who have sent messages
-    students_who_chatted = student_chat_df['user_id'].nunique()
+    students_who_chatted = student_user_messages['user_id'].nunique()
+    total_student_user_messages = len(student_user_messages)
     
-    # Calculate average messages per student (including those who haven't chatted)
-    total_student_messages = len(student_chat_df)
-    avg_messages_per_student = total_student_messages / total_students if total_students > 0 else 0
-    
-    # Calculate average messages per ACTIVE student (only those who have chatted)
-    avg_messages_per_active_student = total_student_messages / students_who_chatted if students_who_chatted > 0 else 0
-    
-    # Calculate participation rate
+    avg_messages_per_student = total_student_user_messages / total_students if total_students > 0 else 0
+    avg_messages_per_active_student = total_student_user_messages / students_who_chatted if students_who_chatted > 0 else 0
     participation_rate = (students_who_chatted / total_students * 100) if total_students > 0 else 0
     
     return {
@@ -208,103 +166,51 @@ def calculate_student_chat_metrics(chat_df, user_profiles_df):
         'student_chat_participation_rate': participation_rate
     }
 
-def calculate_user_metrics(df):
-    """Calculate user-related metrics for student users only"""
+def get_chat_mode_metrics(df):
+    """Calculate chat mode usage metrics for students only"""
     if df.empty:
         return {}
     
-    # Filter to student users only if user_role column exists
-    if 'user_role' in df.columns:
-        df = df[df['user_role'] == 'student']
+    # Filter to student messages only
+    student_messages = df[(df['user_role'] == 'student') & (df['message_id'].notna())]
     
-    if df.empty:
+    if student_messages.empty:
         return {}
     
-    # Ensure created_at_local exists and is datetime type
-    if 'created_at_local' not in df.columns:
-        df['created_at_local'] = pd.to_datetime(df['created_at']).dt.tz_localize('UTC').dt.tz_convert('Europe/Zurich').dt.tz_localize(None)
-    else:
-        # Ensure it's datetime type
-        df['created_at_local'] = pd.to_datetime(df['created_at_local'])
-    
-    # Unique users (students only)
-    unique_users = df['user_id'].nunique()
-    
-    # User interactions (messages per student user)
-    user_interactions = df.groupby('user_id').size()
-    avg_interactions = user_interactions.mean()
-    
-    # Active users (student users who interacted in the last 7 days)
-    last_week = pd.Timestamp.now() - timedelta(days=7)
-    recent_users = df[df['created_at_local'] > last_week]['user_id'].nunique()
-    
-    # User retention (student users who came back)
-    user_sessions = df.groupby('user_id')['created_at_local'].apply(lambda x: x.dt.date.nunique())
-    returning_users = (user_sessions > 1).sum()
-    
-    return {
-        'unique_users': unique_users,
-        'avg_interactions': avg_interactions,
-        'active_users_7d': recent_users,
-        'returning_users': returning_users,
-        'user_interactions': user_interactions
-    }
-
-def calculate_chat_mode_metrics(df):
-    """Calculate chat mode usage metrics for student users only"""
-    if df.empty:
-        return {}
-    
-    # Filter to student users only if user_role column exists
-    if 'user_role' in df.columns:
-        df = df[df['user_role'] == 'student']
-    
-    if df.empty:
-        return {}
-    
-    # Chat mode distribution (MESSAGE-based)
-    mode_counts = df['chat_mode'].value_counts()
+    # Message distribution by mode
+    mode_counts = student_messages['chat_mode'].value_counts()
     mode_percentages = (mode_counts / mode_counts.sum() * 100).round(2)
     
-    # Chat session distribution (CHAT SESSION-based - like SQL query)
-    chat_session_counts = df.groupby('chat_id')['chat_mode'].first().value_counts()
+    # Chat session distribution by mode
+    student_chats = student_messages[['chat_id', 'chat_mode']].drop_duplicates()
+    chat_session_counts = student_chats['chat_mode'].value_counts()
     chat_session_percentages = (chat_session_counts / chat_session_counts.sum() * 100).round(2)
     
-    # User preference (which mode each user uses most, with equal usage detection)
+    # User preferences
     def determine_user_preference(user_messages):
         mode_counts = user_messages.value_counts()
         if len(mode_counts) == 0:
             return 'Unknown'
         elif len(mode_counts) == 1:
-            # User only used one mode
             return mode_counts.index[0]
         elif len(mode_counts) == 2 and mode_counts.iloc[0] == mode_counts.iloc[1]:
-            # User used both modes equally
             return 'Equal Usage'
         else:
-            # User has a clear preference
             return mode_counts.index[0]
     
-    user_mode_preference = df.groupby('user_id')['chat_mode'].apply(determine_user_preference)
+    user_mode_preference = student_messages.groupby('user_id')['chat_mode'].apply(determine_user_preference)
     user_preference_counts = user_mode_preference.value_counts()
     
     return {
-        'mode_counts': mode_counts,  # Messages per mode
-        'mode_percentages': mode_percentages,  # Message percentages
-        'chat_session_counts': chat_session_counts,  # Chat sessions per mode
-        'chat_session_percentages': chat_session_percentages,  # Chat session percentages
+        'mode_counts': mode_counts,
+        'mode_percentages': mode_percentages,
+        'chat_session_counts': chat_session_counts,
+        'chat_session_percentages': chat_session_percentages,
         'user_preferences': user_preference_counts
     }
 
-def calculate_feedback_metrics(df):
-    """Calculate feedback-related metrics for student users only"""
-    if df.empty:
-        return {}
-    
-    # Filter to student users only if user_role column exists
-    if 'user_role' in df.columns:
-        df = df[df['user_role'] == 'student']
-    
+def get_feedback_metrics(df):
+    """Calculate feedback metrics for students only"""
     if df.empty:
         return {
             'total_feedback': 0,
@@ -314,10 +220,14 @@ def calculate_feedback_metrics(df):
             'avg_rating': 0
         }
     
-    # Filter assistant messages with feedback
-    feedback_data = df[(df['role'] == 'assistant') & (df['feedback_rating'].notna())]
+    # Filter to student assistant messages
+    student_assistant_messages = df[
+        (df['user_role'] == 'student') & 
+        (df['message_role'] == 'assistant') & 
+        (df['message_id'].notna())
+    ]
     
-    if feedback_data.empty:
+    if student_assistant_messages.empty:
         return {
             'total_feedback': 0,
             'positive_feedback': 0,
@@ -326,16 +236,31 @@ def calculate_feedback_metrics(df):
             'avg_rating': 0
         }
     
-    total_feedback = len(feedback_data)
-    positive_feedback = (feedback_data['feedback_rating'] == 1).sum()
-    negative_feedback = (feedback_data['feedback_rating'] == 0).sum()
+    # Messages with feedback
+    feedback_messages = student_assistant_messages[student_assistant_messages['message_feedback_rating'].notna()]
     
-    # Feedback rate (percentage of assistant messages that received feedback)
-    total_assistant_messages = (df['role'] == 'assistant').sum()
+    if feedback_messages.empty:
+        return {
+            'total_feedback': 0,
+            'positive_feedback': 0,
+            'negative_feedback': 0,
+            'feedback_rate': 0,
+            'avg_rating': 0
+        }
+    
+    total_feedback = len(feedback_messages)
+    positive_feedback = (feedback_messages['message_feedback_rating'] == 1).sum()
+    negative_feedback = (feedback_messages['message_feedback_rating'] == 0).sum()
+    
+    # Feedback rate
+    total_assistant_messages = len(student_assistant_messages)
     feedback_rate = (total_feedback / total_assistant_messages * 100) if total_assistant_messages > 0 else 0
     
     # Average rating
-    avg_rating = feedback_data['feedback_rating'].mean()
+    avg_rating = feedback_messages['message_feedback_rating'].mean()
+    
+    # Feedback by mode
+    feedback_by_mode = feedback_messages.groupby('chat_mode')['message_feedback_rating'].agg(['count', 'mean'])
     
     return {
         'total_feedback': total_feedback,
@@ -343,42 +268,85 @@ def calculate_feedback_metrics(df):
         'negative_feedback': negative_feedback,
         'feedback_rate': feedback_rate,
         'avg_rating': avg_rating,
-        'feedback_by_mode': feedback_data.groupby('chat_mode')['feedback_rating'].agg(['count', 'mean'])
+        'feedback_by_mode': feedback_by_mode
     }
 
-def calculate_usage_patterns(df):
-    """Calculate usage patterns over time for student users only"""
+def get_usage_patterns(df):
+    """Calculate usage patterns for students only"""
     if df.empty:
         return {}
     
-    # Filter to student users only if user_role column exists
-    if 'user_role' in df.columns:
-        df = df[df['user_role'] == 'student']
+    # Filter to student user messages with timestamps
+    student_messages = df[
+        (df['user_role'] == 'student') & 
+        (df['message_role'] == 'user') & 
+        (df['message_id'].notna()) & 
+        (df['message_created_at_local'].notna())
+    ].copy()
     
-    if df.empty:
+    if student_messages.empty:
         return {}
     
-    df['created_at_local'] = pd.to_datetime(df['created_at_local'])
-    df['date'] = df['created_at_local'].dt.date
-    df['hour'] = df['created_at_local'].dt.hour
-    df['day_of_week'] = df['created_at_local'].dt.day_name()
+    # Add time-based columns
+    student_messages['date'] = student_messages['message_created_at_local'].dt.date
+    student_messages['hour'] = student_messages['message_created_at_local'].dt.hour
+    student_messages['day_of_week'] = student_messages['message_created_at_local'].dt.day_name()
     
     # Daily usage
-    daily_usage = df.groupby('date').agg({
+    daily_usage = student_messages.groupby('date').agg({
         'user_id': 'nunique',
-        'id': 'count'
-    }).rename(columns={'user_id': 'unique_users', 'id': 'total_messages'})
+        'message_id': 'count'
+    }).rename(columns={'user_id': 'unique_users', 'message_id': 'total_messages'})
     
     # Hourly patterns
-    hourly_usage = df.groupby('hour').size()
+    hourly_usage = student_messages.groupby('hour').size()
     
     # Day of week patterns
-    dow_usage = df.groupby('day_of_week').size()
+    dow_usage = student_messages.groupby('day_of_week').size()
     
     return {
         'daily_usage': daily_usage,
         'hourly_usage': hourly_usage,
         'dow_usage': dow_usage
+    }
+
+def get_user_engagement_metrics(df):
+    """Calculate user engagement metrics for students only"""
+    if df.empty:
+        return {}
+    
+    # Filter to student user messages only
+    student_messages = df[
+        (df['user_role'] == 'student') & 
+        (df['message_role'] == 'user') & 
+        (df['message_id'].notna())
+    ]
+    
+    if student_messages.empty:
+        return {}
+    
+    # User interactions
+    user_interactions = student_messages.groupby('user_id').size()
+    
+    # Active users (last 7 days)
+    if 'message_created_at_local' in student_messages.columns:
+        last_week = pd.Timestamp.now() - timedelta(days=7)
+        recent_users = student_messages[
+            student_messages['message_created_at_local'] > last_week
+        ]['user_id'].nunique()
+    else:
+        recent_users = 0
+    
+    # Returning users (users with multiple chat sessions)
+    user_sessions = student_messages.groupby('user_id')['chat_id'].nunique()
+    returning_users = (user_sessions > 1).sum()
+    
+    return {
+        'unique_users': student_messages['user_id'].nunique(),
+        'avg_interactions': user_interactions.mean(),
+        'active_users_7d': recent_users,
+        'returning_users': returning_users,
+        'user_interactions': user_interactions
     }
 
 def show_admin_login():
@@ -419,17 +387,21 @@ def show_dashboard():
             st.session_state.admin_user_id = None
         st.rerun()
     
-    # Fetch data
+    # Fetch comprehensive data
     with st.spinner("Loading analytics data..."):
-        df, user_profiles_df = fetch_analytics_data()
+        df = fetch_comprehensive_data()
     
-    if user_profiles_df.empty:
-        st.warning("No user profile data available!")
+    if df.empty:
+        st.warning("No data available! Please check database connection and permissions.")
         return
     
-    # Calculate user profile metrics
-    profile_metrics = calculate_user_profile_metrics(user_profiles_df)
-    student_chat_metrics = calculate_student_chat_metrics(df, user_profiles_df)
+    # Calculate all metrics
+    registration_metrics = get_user_registration_metrics(df)
+    student_chat_metrics = get_student_chat_metrics(df)
+    chat_mode_metrics = get_chat_mode_metrics(df)
+    feedback_metrics = get_feedback_metrics(df)
+    usage_patterns = get_usage_patterns(df)
+    engagement_metrics = get_user_engagement_metrics(df)
     
     # User Registration Overview
     st.header("👥 User Registration Overview")
@@ -438,40 +410,30 @@ def show_dashboard():
     with col1:
         st.metric(
             label="📝 Total Registered Users",
-            value=profile_metrics.get('total_registered', 0),
+            value=registration_metrics.get('total_registered', 0),
             delta=None
         )
     
     with col2:
         st.metric(
             label="🎓 Students",
-            value=profile_metrics.get('students', 0),
-            delta=f"{profile_metrics.get('students', 0)/profile_metrics.get('total_registered', 1)*100:.1f}%" if profile_metrics.get('total_registered', 0) > 0 else "0%"
+            value=registration_metrics.get('students', 0),
+            delta=f"{registration_metrics.get('students', 0)/registration_metrics.get('total_registered', 1)*100:.1f}%" if registration_metrics.get('total_registered', 0) > 0 else "0%"
         )
     
     with col3:
         st.metric(
             label="👑 Admins",
-            value=profile_metrics.get('admins', 0),
-            delta=f"{profile_metrics.get('admins', 0)/profile_metrics.get('total_registered', 1)*100:.1f}%" if profile_metrics.get('total_registered', 0) > 0 else "0%"
+            value=registration_metrics.get('admins', 0),
+            delta=f"{registration_metrics.get('admins', 0)/registration_metrics.get('total_registered', 1)*100:.1f}%" if registration_metrics.get('total_registered', 0) > 0 else "0%"
         )
     
     with col4:
         st.metric(
             label="🧪 Testers",
-            value=profile_metrics.get('testers', 0),
-            delta=f"{profile_metrics.get('testers', 0)/profile_metrics.get('total_registered', 1)*100:.1f}%" if profile_metrics.get('total_registered', 0) > 0 else "0%"
+            value=registration_metrics.get('testers', 0),
+            delta=f"{registration_metrics.get('testers', 0)/registration_metrics.get('total_registered', 1)*100:.1f}%" if registration_metrics.get('total_registered', 0) > 0 else "0%"
         )
-    
-    if df.empty:
-        st.warning("No chat data available yet. Student users haven't started chatting!")
-        return
-    
-    # Calculate metrics (now filtered for students only)
-    user_metrics = calculate_user_metrics(df)
-    chat_metrics = calculate_chat_mode_metrics(df)
-    feedback_metrics = calculate_feedback_metrics(df)
-    usage_metrics = calculate_usage_patterns(df)
     
     # Student Chat Activity Overview
     st.header("📈 Student Chat Activity Overview")
@@ -485,17 +447,18 @@ def show_dashboard():
         )
     
     with col2:
-        # Calculate total student messages from the filtered dataframe (only user messages, exclude assistant)
-        if 'user_role' in df.columns and 'role' in df.columns:
-            student_user_messages = df[(df['user_role'] == 'student') & (df['role'] == 'user')]
-            total_student_messages = len(student_user_messages)
-        else:
-            total_student_messages = 0
+        # Calculate total student messages (user messages only)
+        student_user_messages = df[
+            (df['user_role'] == 'student') & 
+            (df['message_role'] == 'user') & 
+            (df['message_id'].notna())
+        ]
+        total_student_messages = len(student_user_messages)
         
         st.metric(
             label="📝 Total Student Messages",
             value=total_student_messages,
-            delta=f"{total_student_messages/student_chat_metrics.get('students_who_chatted', 1):.1f} avg/student" if student_chat_metrics.get('students_who_chatted', 0) > 0 else "No active students"
+            delta=f"{student_chat_metrics.get('avg_messages_per_active_student', 0):.1f} avg/active student"
         )
     
     with col3:
@@ -508,92 +471,81 @@ def show_dashboard():
     with col4:
         st.metric(
             label="👍 Satisfaction",
-            value=f"{feedback_metrics.get('avg_rating', 0):.2f}",
+            value=f"{feedback_metrics.get('avg_rating', 0)*100:.1f}%",
             delta=f"{feedback_metrics.get('positive_feedback', 0)}/{feedback_metrics.get('total_feedback', 0)}"
         )
     
     # Chat Mode Analysis
     st.header("🎭 Chat Mode Analysis")
     
-    # Create three columns for the different metrics
-    col1, col2, col3 = st.columns(3)
+    if chat_mode_metrics:
+        col1, col2, col3 = st.columns(3)
 
-    with col1:
-        if 'chat_session_percentages' in chat_metrics and not chat_metrics['chat_session_percentages'].empty:
-            fig_sessions = px.pie(
-                values=chat_metrics['chat_session_percentages'].values,
-                names=chat_metrics['chat_session_percentages'].index,
-                title="Chat Session Distribution<br><sub>Number of chats started per mode</sub>",
-                color=chat_metrics['chat_session_percentages'].index,
-                color_discrete_map={'Sokrates': '#FF6B6B', 'Aristoteles': '#4ECDC4'}
-            )
-            fig_sessions.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig_sessions, use_container_width=True)
+        with col1:
+            if 'chat_session_percentages' in chat_mode_metrics and not chat_mode_metrics['chat_session_percentages'].empty:
+                fig_sessions = px.pie(
+                    values=chat_mode_metrics['chat_session_percentages'].values,
+                    names=chat_mode_metrics['chat_session_percentages'].index,
+                    title="Chat Session Distribution<br><sub>Number of chats started per mode</sub>",
+                    color=chat_mode_metrics['chat_session_percentages'].index,
+                    color_discrete_map={'Sokrates': '#FF6B6B', 'Aristoteles': '#4ECDC4'}
+                )
+                fig_sessions.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_sessions, use_container_width=True)
 
-    with col2:
-        if 'mode_percentages' in chat_metrics and not chat_metrics['mode_percentages'].empty:
-            fig_messages = px.pie(
-                values=chat_metrics['mode_percentages'].values,
-                names=chat_metrics['mode_percentages'].index,
-                title="Message Distribution<br><sub>Total messages per mode</sub>",
-                color=chat_metrics['mode_percentages'].index,
-                color_discrete_map={'Sokrates': '#FF6B6B', 'Aristoteles': '#4ECDC4'}
-            )
-            fig_messages.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig_messages, use_container_width=True)
-    
-    with col3:
-        if 'user_preferences' in chat_metrics and not chat_metrics['user_preferences'].empty:
-            fig_pref = px.bar(
-                x=chat_metrics['user_preferences'].index,
-                y=chat_metrics['user_preferences'].values,
-                title="User Preferred Chat Mode<br><sub>Individual user preferences</sub>",
-                labels={'x': 'Chat Mode', 'y': 'Number of Users'},
-                color=chat_metrics['user_preferences'].index,
-                color_discrete_map={
-                    'Sokrates': '#FF6B6B', 
-                    'Aristoteles': '#4ECDC4',
-                    'Equal Usage': '#9B59B6'
-                }
-            )
-            fig_pref.update_layout(bargap=0.05, bargroupgap=0.0)  # Make bars closer together
-            fig_pref.update_traces(marker_line_width=0, width=0.8)  # Thicker bars
-            st.plotly_chart(fig_pref, use_container_width=True)
-    
-    # Explanation of the metrics
-    with st.expander("ℹ️ Understanding Chat Mode Metrics"):
-        st.markdown("""
-        **Three Different Perspectives on Chat Mode Usage:**
+        with col2:
+            if 'mode_percentages' in chat_mode_metrics and not chat_mode_metrics['mode_percentages'].empty:
+                fig_messages = px.pie(
+                    values=chat_mode_metrics['mode_percentages'].values,
+                    names=chat_mode_metrics['mode_percentages'].index,
+                    title="Message Distribution<br><sub>Total messages per mode</sub>",
+                    color=chat_mode_metrics['mode_percentages'].index,
+                    color_discrete_map={'Sokrates': '#FF6B6B', 'Aristoteles': '#4ECDC4'}
+                )
+                fig_messages.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_messages, use_container_width=True)
         
-        1. **Chat Session Distribution**: Shows which mode students prefer to initiate conversations with 
-                    
-        2. **Message Distribution**: Shows which mode generates more conversation/engagement
-
-        3. **User Preferences**: Shows how many individual users prefer each mode
-        """)
+        with col3:
+            if 'user_preferences' in chat_mode_metrics and not chat_mode_metrics['user_preferences'].empty:
+                fig_pref = px.bar(
+                    x=chat_mode_metrics['user_preferences'].index,
+                    y=chat_mode_metrics['user_preferences'].values,
+                    title="User Preferred Chat Mode<br><sub>Individual user preferences</sub>",
+                    labels={'x': 'Chat Mode', 'y': 'Number of Users'},
+                    color=chat_mode_metrics['user_preferences'].index,
+                    color_discrete_map={
+                        'Sokrates': '#FF6B6B', 
+                        'Aristoteles': '#4ECDC4',
+                        'Equal Usage': '#9B59B6'
+                    }
+                )
+                fig_pref.update_layout(bargap=0.05, bargroupgap=0.0)
+                fig_pref.update_traces(marker_line_width=0, width=0.8)
+                st.plotly_chart(fig_pref, use_container_width=True)
     
     # Usage Patterns
     st.header("📅 Usage Patterns")
     
-    if 'daily_usage' in usage_metrics:
+    if usage_patterns and 'daily_usage' in usage_patterns:
         col1, col2 = st.columns(2)
         
         with col1:
             # Daily usage over time
-            daily_df = usage_metrics['daily_usage'].reset_index()
-            fig_daily = px.line(
-                daily_df,
-                x='date',
-                y=['unique_users', 'total_messages'],
-                title="Daily Usage Trends",
-                labels={'value': 'Count', 'date': 'Date'}
-            )
-            st.plotly_chart(fig_daily, use_container_width=True)
+            daily_df = usage_patterns['daily_usage'].reset_index()
+            if not daily_df.empty:
+                fig_daily = px.line(
+                    daily_df,
+                    x='date',
+                    y=['unique_users', 'total_messages'],
+                    title="Daily Usage Trends",
+                    labels={'value': 'Count', 'date': 'Date'}
+                )
+                st.plotly_chart(fig_daily, use_container_width=True)
         
         with col2:
             # Hourly usage pattern
-            if 'hourly_usage' in usage_metrics:
-                hourly_usage = usage_metrics['hourly_usage']
+            if 'hourly_usage' in usage_patterns and not usage_patterns['hourly_usage'].empty:
+                hourly_usage = usage_patterns['hourly_usage']
                 fig_hourly = px.bar(
                     x=hourly_usage.index,
                     y=hourly_usage.values,
@@ -602,7 +554,7 @@ def show_dashboard():
                     color=hourly_usage.values,
                     color_continuous_scale='viridis'
                 )
-                fig_hourly.update_xaxes(dtick=1, tickmode='array', tickvals=list(hourly_usage.index), ticktext=[str(h) for h in hourly_usage.index])
+                fig_hourly.update_xaxes(dtick=1)
                 st.plotly_chart(fig_hourly, use_container_width=True)
     
     # Feedback Analysis
@@ -610,181 +562,199 @@ def show_dashboard():
     col1, col2 = st.columns(2)
     
     with col1:
-        # Overall feedback distribution relative to total messages for Aristoteles
-        aristoteles_df = df[df['chat_mode'] == 'Aristoteles']
-        total_aristoteles_messages = (aristoteles_df['role'] == 'assistant').sum()
-        aristoteles_feedback = aristoteles_df[(aristoteles_df['role'] == 'assistant') & (aristoteles_df['feedback_rating'].notna())]
+        # Aristoteles feedback
+        aristoteles_messages = df[
+            (df['user_role'] == 'student') & 
+            (df['chat_mode'] == 'Aristoteles') & 
+            (df['message_role'] == 'assistant') & 
+            (df['message_id'].notna())
+        ]
         
-        if len(aristoteles_feedback) > 0 and total_aristoteles_messages > 0:
-            positive_aristoteles = (aristoteles_feedback['feedback_rating'] == 1).sum()
-            negative_aristoteles = (aristoteles_feedback['feedback_rating'] == 0).sum()
-            total_aristoteles_feedback = len(aristoteles_feedback)
+        if not aristoteles_messages.empty:
+            total_aristoteles_messages = len(aristoteles_messages)
+            aristoteles_feedback = aristoteles_messages[aristoteles_messages['message_feedback_rating'].notna()]
             
-            feedback_labels = ['Positive 👍', 'Negative 👎', 'No Feedback']
-            feedback_values = [
-                positive_aristoteles,
-                negative_aristoteles,
-                total_aristoteles_messages - total_aristoteles_feedback
-            ]
-            
-            fig_feedback = px.pie(
-                values=feedback_values,
-                names=feedback_labels,
-                title="Aristoteles Feedback",
-                color=feedback_labels,
-                color_discrete_map={
-                    'Positive 👍': '#2ECC71', 
-                    'Negative 👎': '#E74C3C',
-                    'No Feedback': '#95A5A6'
-                }
-            )
-            st.plotly_chart(fig_feedback, use_container_width=True)
+            if not aristoteles_feedback.empty:
+                positive_aristoteles = (aristoteles_feedback['message_feedback_rating'] == 1).sum()
+                negative_aristoteles = (aristoteles_feedback['message_feedback_rating'] == 0).sum()
+                total_aristoteles_feedback = len(aristoteles_feedback)
+                
+                feedback_labels = ['Positive 👍', 'Negative 👎', 'No Feedback']
+                feedback_values = [
+                    positive_aristoteles,
+                    negative_aristoteles,
+                    total_aristoteles_messages - total_aristoteles_feedback
+                ]
+                
+                fig_feedback = px.pie(
+                    values=feedback_values,
+                    names=feedback_labels,
+                    title="Aristoteles Feedback",
+                    color=feedback_labels,
+                    color_discrete_map={
+                        'Positive 👍': '#2ECC71', 
+                        'Negative 👎': '#E74C3C',
+                        'No Feedback': '#95A5A6'
+                    }
+                )
+                st.plotly_chart(fig_feedback, use_container_width=True)
+            else:
+                st.info("No Aristoteles feedback data available yet.")
         else:
-            st.info("No Aristoteles feedback data available yet.")
+            st.info("No Aristoteles messages available yet.")
     
     with col2:
-        # Overall feedback distribution relative to total messages for Sokrates
-        sokrates_df = df[df['chat_mode'] == 'Sokrates']
-        total_sokrates_messages = (sokrates_df['role'] == 'assistant').sum()
-        sokrates_feedback = sokrates_df[(sokrates_df['role'] == 'assistant') & (sokrates_df['feedback_rating'].notna())]
+        # Sokrates feedback
+        sokrates_messages = df[
+            (df['user_role'] == 'student') & 
+            (df['chat_mode'] == 'Sokrates') & 
+            (df['message_role'] == 'assistant') & 
+            (df['message_id'].notna())
+        ]
         
-        if len(sokrates_feedback) > 0 and total_sokrates_messages > 0:
-            positive_sokrates = (sokrates_feedback['feedback_rating'] == 1).sum()
-            negative_sokrates = (sokrates_feedback['feedback_rating'] == 0).sum()
-            total_sokrates_feedback = len(sokrates_feedback)
+        if not sokrates_messages.empty:
+            total_sokrates_messages = len(sokrates_messages)
+            sokrates_feedback = sokrates_messages[sokrates_messages['message_feedback_rating'].notna()]
             
-            feedback_labels = ['Positive 👍', 'Negative 👎', 'No Feedback']
-            feedback_values = [
-                positive_sokrates,
-                negative_sokrates,
-                total_sokrates_messages - total_sokrates_feedback
-            ]
-            
-            fig_feedback = px.pie(
-                values=feedback_values,
-                names=feedback_labels,
-                title="Sokrates Feedback",
-                color=feedback_labels,
-                color_discrete_map={
-                    'Positive 👍': '#2ECC71', 
-                    'Negative 👎': '#E74C3C',
-                    'No Feedback': '#95A5A6'
-                }
-            )
-            st.plotly_chart(fig_feedback, use_container_width=True)
+            if not sokrates_feedback.empty:
+                positive_sokrates = (sokrates_feedback['message_feedback_rating'] == 1).sum()
+                negative_sokrates = (sokrates_feedback['message_feedback_rating'] == 0).sum()
+                total_sokrates_feedback = len(sokrates_feedback)
+                
+                feedback_labels = ['Positive 👍', 'Negative 👎', 'No Feedback']
+                feedback_values = [
+                    positive_sokrates,
+                    negative_sokrates,
+                    total_sokrates_messages - total_sokrates_feedback
+                ]
+                
+                fig_feedback = px.pie(
+                    values=feedback_values,
+                    names=feedback_labels,
+                    title="Sokrates Feedback",
+                    color=feedback_labels,
+                    color_discrete_map={
+                        'Positive 👍': '#2ECC71', 
+                        'Negative 👎': '#E74C3C',
+                        'No Feedback': '#95A5A6'
+                    }
+                )
+                st.plotly_chart(fig_feedback, use_container_width=True)
+            else:
+                st.info("No Sokrates feedback data available yet.")
         else:
-            st.info("No Sokrates feedback data available yet.")
+            st.info("No Sokrates messages available yet.")
     
     # User Engagement
     st.header("👤 User Engagement")
     
-    if 'user_interactions' in user_metrics:
-        # Calculate interactions by mode for each user
-        user_mode_interactions = df.groupby(['user_id', 'chat_mode']).size().reset_index(name='interactions')
+    if engagement_metrics and 'user_interactions' in engagement_metrics:
+        # Calculate interactions by mode for each user (user messages only)
+        student_messages = df[
+            (df['user_role'] == 'student') & 
+            (df['message_role'] == 'user') & 
+            (df['message_id'].notna())
+        ]
         
-        # Create stacked histogram
-        fig_engagement = px.histogram(
-            user_mode_interactions,
-            x='interactions',
-            color='chat_mode',
-            nbins=20,
-            title="Distribution of User Interactions by Chat Mode",
-            labels={'interactions': 'Number of Interactions', 'count': 'Number of Users'},
-            color_discrete_map={'Sokrates': '#FF6B6B', 'Aristoteles': '#4ECDC4'},
-            barmode='group'
-        )
-        fig_engagement.update_yaxes(title_text="Number of Users")
-        st.plotly_chart(fig_engagement, use_container_width=True)
-        
-        # Mode-specific engagement statistics
-        st.subheader("📊 Mode Comparison")
-        
-        # Calculate metrics for both modes
-        sokrates_interactions = user_mode_interactions[user_mode_interactions['chat_mode'] == 'Sokrates']['interactions']
-        aristoteles_interactions = user_mode_interactions[user_mode_interactions['chat_mode'] == 'Aristoteles']['interactions']
-        
-        # Create comparison table
-        comparison_data = {
-            'Metric': [
-                'Most Active User (interactions)',
-                'Median Interactions per User',
-                'Users with 1 interaction only'
-            ],
-            'Aristoteles': [
-                f"{aristoteles_interactions.max()}" if len(aristoteles_interactions) > 0 else "No data",
-                f"{aristoteles_interactions.median():.0f}" if len(aristoteles_interactions) > 0 else "No data",
-                f"{(aristoteles_interactions == 1).sum()}" if len(aristoteles_interactions) > 0 else "No data"
-            ],
-            'Sokrates': [
-                f"{sokrates_interactions.max()}" if len(sokrates_interactions) > 0 else "No data",
-                f"{sokrates_interactions.median():.0f}" if len(sokrates_interactions) > 0 else "No data",
-                f"{(sokrates_interactions == 1).sum()}" if len(sokrates_interactions) > 0 else "No data"
-            ]
-        }
-        
-        comparison_df = pd.DataFrame(comparison_data)
-        st.table(comparison_df)
+        if not student_messages.empty:
+            user_mode_interactions = student_messages.groupby(['user_id', 'chat_mode']).size().reset_index(name='interactions')
+            
+            # Create stacked histogram
+            fig_engagement = px.histogram(
+                user_mode_interactions,
+                x='interactions',
+                color='chat_mode',
+                nbins=20,
+                title="Distribution of User Interactions by Chat Mode",
+                labels={'interactions': 'Number of Interactions', 'count': 'Number of Users'},
+                color_discrete_map={'Sokrates': '#FF6B6B', 'Aristoteles': '#4ECDC4'},
+                barmode='group'
+            )
+            fig_engagement.update_yaxes(title_text="Number of Users", dtick=1)
+            st.plotly_chart(fig_engagement, use_container_width=True)
+            
+            # Mode-specific engagement statistics
+            st.subheader("📊 Mode Comparison")
+            
+            sokrates_interactions = user_mode_interactions[user_mode_interactions['chat_mode'] == 'Sokrates']['interactions']
+            aristoteles_interactions = user_mode_interactions[user_mode_interactions['chat_mode'] == 'Aristoteles']['interactions']
+            
+            comparison_data = {
+                'Metric': [
+                    'Most Active User (interactions)',
+                    'Median Interactions per User',
+                    'Users with 1 interaction only'
+                ],
+                'Aristoteles': [
+                    f"{aristoteles_interactions.max()}" if len(aristoteles_interactions) > 0 else "No data",
+                    f"{aristoteles_interactions.median():.0f}" if len(aristoteles_interactions) > 0 else "No data",
+                    f"{(aristoteles_interactions == 1).sum()}" if len(aristoteles_interactions) > 0 else "No data"
+                ],
+                'Sokrates': [
+                    f"{sokrates_interactions.max()}" if len(sokrates_interactions) > 0 else "No data",
+                    f"{sokrates_interactions.median():.0f}" if len(sokrates_interactions) > 0 else "No data",
+                    f"{(sokrates_interactions == 1).sum()}" if len(sokrates_interactions) > 0 else "No data"
+                ]
+            }
+            
+            comparison_df = pd.DataFrame(comparison_data)
+            st.table(comparison_df)
     
     # Recent Activity
     st.header("🕐 Recent Activity")
     
-    # Get recent chats (last 10) based on the most recent message in each chat
-    recent_chats = (df.groupby(['chat_id', 'chat_mode'])
-                   .agg({'created_at_local': 'max'})
-                   .reset_index()
-                   .sort_values('created_at_local', ascending=False)
-                   .head(10))
-    
-    st.subheader("Latest Chat Sessions")
-    for _, chat_row in recent_chats.iterrows():
-        chat_id = chat_row['chat_id']
-        chat_mode = chat_row['chat_mode']
-        latest_time = chat_row['created_at_local']
+    # Get recent chats
+    recent_chat_messages = df[df['message_id'].notna()].copy()
+    if not recent_chat_messages.empty:
+        recent_chats = (recent_chat_messages.groupby(['chat_id', 'chat_mode'])
+                       .agg({'message_created_at_local': 'max'})
+                       .reset_index()
+                       .sort_values('message_created_at_local', ascending=False)
+                       .head(10))
         
-        # Get all messages for this chat
-        chat_messages = df[df['chat_id'] == chat_id].sort_values('created_at_local')
-        
-        # Create expander title with chat info
-        message_count = len(chat_messages)
-        with st.expander(f"💬 {chat_mode} Chat - {latest_time} ({message_count} messages)"):
+        st.subheader("Latest Chat Sessions")
+        for _, chat_row in recent_chats.iterrows():
+            chat_id = chat_row['chat_id']
+            chat_mode = chat_row['chat_mode']
+            latest_time = chat_row['message_created_at_local']
             
-            # Display all messages in the chat
-            for _, message in chat_messages.iterrows():
-                # Determine the display name based on role and chat mode
-                if message['role'] == 'user':
-                    display_name = "👤 User"
-                elif message['role'] == 'assistant':
-                    if chat_mode == 'Sokrates':
-                        display_name = "🧙‍♂️ Sokrates"
-                    else:  # Aristoteles
-                        display_name = "🎓 Aristoteles"
-                else:
-                    display_name = f"❓ {message['role'].title()}"
+            # Get all messages for this chat
+            chat_messages = df[df['chat_id'] == chat_id].sort_values('message_created_at_local')
+            
+            # Get user role for this chat
+            user_role = chat_messages['user_role'].iloc[0] if not chat_messages.empty else 'Unknown'
+            user_role_display = user_role.title() if user_role else 'Unknown'
+            
+            message_count = len(chat_messages[chat_messages['message_id'].notna()])
+            with st.expander(f"💬 {chat_mode} Chat - {user_role_display} User - {latest_time} ({message_count} messages)"):
                 
-                # Display message content
-                st.markdown(f"**{display_name}:**")
-                content_preview = message['content'][:300] + ('...' if len(message['content']) > 300 else '')
-                st.markdown(f"_{content_preview}_")
-                
-                # Show feedback only for assistant messages
-                if message['role'] == 'assistant' and pd.notna(message['feedback_rating']):
-                    if message['feedback_rating'] == 1:
-                        rating = "👍 Positive"
-                    elif message['feedback_rating'] == 0:
-                        rating = "👎 Negative"
+                for _, message in chat_messages[chat_messages['message_id'].notna()].iterrows():
+                    if message['message_role'] == 'user':
+                        display_name = "👤 User"
+                    elif message['message_role'] == 'assistant':
+                        if chat_mode == 'Sokrates':
+                            display_name = "🧙‍♂️ Sokrates"
+                        else:
+                            display_name = "🎓 Aristoteles"
                     else:
-                        rating = "❓ Unknown"
-                    st.markdown(f"**Feedback:** {rating}")
-                    if pd.notna(message['feedback_text']) and message['feedback_text'].strip():
-                        st.markdown(f"**Feedback Text:** _{message['feedback_text']}_")
-                
-                # Add separator between messages (except for the last one)
-                if message.name != chat_messages.index[-1]:
-                    st.markdown("---")
+                        display_name = f"❓ {message['message_role'].title()}"
+                    
+                    st.markdown(f"**{display_name}:**")
+                    content_preview = str(message['message_content'])[:300] + ('...' if len(str(message['message_content'])) > 300 else '')
+                    st.markdown(f"_{content_preview}_")
+                    
+                    if message['message_role'] == 'assistant' and pd.notna(message['message_feedback_rating']):
+                        rating = "👍 Positive" if message['message_feedback_rating'] == 1 else "👎 Negative"
+                        st.markdown(f"**Feedback:** {rating}")
+                        if pd.notna(message['message_feedback_text']) and str(message['message_feedback_text']).strip():
+                            st.markdown(f"**Feedback Text:** _{message['message_feedback_text']}_")
+                    
+                    if message.name != chat_messages[chat_messages['message_id'].notna()].index[-1]:
+                        st.markdown("---")
     
     # Data Export
     st.header("📤 Data Export")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         if st.button("📊 Download Analytics Summary"):
@@ -805,19 +775,19 @@ def show_dashboard():
                     'Aristoteles Usage %'
                 ],
                 'Value': [
-                    profile_metrics.get('total_registered', 0),
-                    profile_metrics.get('students', 0),
-                    profile_metrics.get('admins', 0),
-                    profile_metrics.get('testers', 0),
+                    registration_metrics.get('total_registered', 0),
+                    registration_metrics.get('students', 0),
+                    registration_metrics.get('admins', 0),
+                    registration_metrics.get('testers', 0),
                     student_chat_metrics.get('students_who_chatted', 0),
                     f"{student_chat_metrics.get('student_chat_participation_rate', 0):.1f}%",
                     f"{student_chat_metrics.get('avg_messages_per_active_student', 0):.2f}",
-                    user_metrics.get('active_users_7d', 0),
-                    user_metrics.get('returning_users', 0),
+                    engagement_metrics.get('active_users_7d', 0),
+                    engagement_metrics.get('returning_users', 0),
                     feedback_metrics.get('total_feedback', 0),
                     f"{feedback_metrics.get('avg_rating', 0):.2f}",
-                    f"{chat_metrics.get('mode_percentages', {}).get('Sokrates', 0):.1f}%",
-                    f"{chat_metrics.get('mode_percentages', {}).get('Aristoteles', 0):.1f}%"
+                    f"{chat_mode_metrics.get('mode_percentages', {}).get('Sokrates', 0):.1f}%" if chat_mode_metrics else "0%",
+                    f"{chat_mode_metrics.get('mode_percentages', {}).get('Aristoteles', 0):.1f}%" if chat_mode_metrics else "0%"
                 ]
             }
             summary_df = pd.DataFrame(summary_data)
@@ -830,6 +800,17 @@ def show_dashboard():
             )
     
     with col2:
+        if st.button("📋 Download Raw Dataset"):
+            # Prepare raw data for download
+            raw_csv = df.to_csv(index=False)
+            st.download_button(
+                label="Download Raw Data CSV",
+                data=raw_csv,
+                file_name=f"chatbot_raw_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+    
+    with col3:
         if st.button("🔄 Refresh Data"):
             st.cache_data.clear()
             st.rerun()

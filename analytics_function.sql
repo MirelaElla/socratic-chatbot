@@ -1,54 +1,47 @@
 -- Add this function to your Supabase SQL editor to support the analytics dashboard
--- This function provides a consolidated view of chat data for analytics
+-- This function provides raw chat data for analytics
 -- Note: This function uses SECURITY DEFINER to bypass RLS for analytics
 
-CREATE OR REPLACE FUNCTION get_analytics_data()
-RETURNS TABLE (
-    id INTEGER,
-    chat_id INTEGER,
-    role VARCHAR(20),
-    content TEXT,
-    feedback_rating INTEGER,
-    feedback_text TEXT,
-    created_at TIMESTAMP WITH TIME ZONE,
-    created_at_local TIMESTAMP WITHOUT TIME ZONE,
-    user_id UUID,
-    chat_mode VARCHAR(20)
+-- Create RPC function with proper table aliases and qualified column references
+CREATE OR REPLACE FUNCTION public.get_comprehensive_analytics_data()
+returns table(
+  user_id uuid,
+  user_email text,
+  user_role text,
+  profile_created_at timestamp with time zone,
+  chat_id integer,
+  chat_mode text,
+  chat_created_at timestamp with time zone,
+  message_id integer,
+  message_role text,
+  message_content text,
+  message_feedback_rating integer,
+  message_feedback_text text,
+  message_created_at timestamp with time zone
 )
-LANGUAGE sql
-SECURITY DEFINER
-AS $$
-    SELECT 
-        cm.id,
-        cm.chat_id,
-        cm.role,
-        cm.content,
-        cm.feedback_rating,
-        cm.feedback_text,
-        cm.created_at,
-        cm.created_at AT TIME ZONE 'Europe/Zurich' AS created_at_local,
-        c.user_id,
-        c.mode as chat_mode
-    FROM chat_messages cm
-    JOIN chats c ON cm.chat_id = c.id
-    ORDER BY cm.created_at DESC;
+LANGUAGE sql stable
+SECURITY definer
+as $$
+SELECT
+  au.id                        AS user_id,
+  au.email                     AS user_email,
+  up.user_role                 AS user_role,
+  up.created_at                AS profile_created_at,
+  ch.id                        AS chat_id,
+  ch.mode                      AS chat_mode,
+  ch.created_at                AS chat_created_at,
+  cm.id                        AS message_id,
+  cm.role                      AS message_role,
+  cm.content                   AS message_content,
+  cm.feedback_rating           AS message_feedback_rating,
+  cm.feedback_text             AS message_feedback_text,
+  cm.created_at                AS message_created_at
+FROM auth.users au
+LEFT JOIN public.user_profiles up ON up.id = au.id
+LEFT JOIN public.chats ch ON ch.user_id = au.id
+LEFT JOIN public.chat_messages cm ON cm.chat_id = ch.id
+ORDER BY cm.created_at ASC NULLS LAST;
 $$;
 
--- Grant execute permission to authenticated users
-GRANT EXECUTE ON FUNCTION get_analytics_data() TO authenticated;
-
--- Additional function to get all user profiles for analytics (bypasses RLS)
-CREATE OR REPLACE FUNCTION get_all_user_profiles()
-RETURNS TABLE (
-    id UUID,
-    user_role TEXT,
-    created_at TIMESTAMP WITH TIME ZONE
-)
-LANGUAGE sql
-SECURITY DEFINER
-AS $$
-    SELECT id, user_role, created_at FROM user_profiles;
-$$;
-
--- Grant execute permission to authenticated users
-GRANT EXECUTE ON FUNCTION get_all_user_profiles() TO authenticated;
+-- Grant execute to authenticated role
+GRANT EXECUTE ON FUNCTION public.get_comprehensive_analytics_data() to authenticated;
