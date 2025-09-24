@@ -19,7 +19,7 @@ This is an AI chatbot that uses Socratic dialogue to help students understand th
 
 ## Getting started
 * You need an OpenAI API key saved in the ".env" file (OPENAI_API_KEY = "your-key-comes-here"). The .env file is git-ignored.
-* Set up Supabase project with authentication and database (see SUPABASE_CONFIG.md)
+* Set up Supabase project with authentication and database (see database_setup.sql)
 * Create environment in cmd terminal (if not done yet): `python -m venv venv`
 * Activate environment (on Windows): `venv\Scripts\activate`
 * To install all required packages run `pip install -r requirements.txt`
@@ -33,15 +33,18 @@ Run the SQL commands in `database_setup.sql` in your Supabase SQL editor to set 
 - `chats`: Tracks individual chat sessions with mode selection (Sokrates/Aristoteles)
 - `chat_messages`: Stores individual messages within chat sessions
 - Includes feedback columns: `feedback_rating` (0/1 for thumbs down/up) and `feedback_text`
+- For e-mail verification, just enable the "Confirm email" option in Supabase Authentication settings (under SignIn/Providers). Currently, it is disabled to allow easy testing.
 
 ## Models used
-* OpenAI's `gpt-4`
+* OpenAI's `gpt-4.1`
 
 # To Do
 - [x] user auth
 - [x] user history logging  
 - [x] User feedback system
 - [x] Streaming answers
-- [ ] Analytics dashboard for feedback data (adjust to new DB structure, review SQL syntax)
-- [ ] Improve system prompt for socrates chat to be more helpful (less fixed on the book)
+- [x] Analytics dashboard for feedback data (adjust to new DB structure, review SQL syntax)
+- [x] Improve system prompt for socrates chat to be more helpful (less fixed on the book)
 - [x] Registration issue: Outlook puts the confirmation email into quarantine. --> remove verification step
+- [ ] Test email verification step on Fernuni email (supabase email has been whitelisted by Fernuni)
+- [ ] refactor app code for easier maintenance

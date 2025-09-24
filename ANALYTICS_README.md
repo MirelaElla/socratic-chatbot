@@ -33,7 +33,6 @@ The new requirement added:
 - `plotly==5.24.1` - For interactive charts and visualizations
 
 ### 2. Database Setup
-**Important**: Run the new database schema first:
 1. Execute `database_setup.sql` in Supabase SQL editor
 2. Execute `analytics_function.sql` in Supabase SQL editor for data queries
 
@@ -109,24 +108,6 @@ You can integrate this as part of a multi-page Streamlit app. Create a `pages/` 
 - **Peak Hours**: When students are most active
 - **Day of Week**: Usage patterns across the week
 
-## Data Privacy and Security
-
-### 1. Admin Access Only
-- Dashboard requires authenticated admin access
-- Uses role-based access control via profiles table
-- Only users with admin role can access the dashboard
-- No public access to sensitive user data
-
-### 2. Data Anonymization
-- User IDs are shown as UUIDs (anonymized)
-- No personal information displayed
-- Content previews are truncated
-
-### 3. Data Caching
-- Analytics data is cached for 5 minutes
-- Reduces database load
-- Can be refreshed manually
-
 ## Troubleshooting
 
 ### Common Issues
@@ -181,6 +162,7 @@ chat_messages:
 **Note**: The user_profiles table is required for admin authentication. Users must have `user_role = 'admin'` to access the dashboard.
 
 ## Admin User Management
+Can be managed in Supabase UI directly or with sql commands.
 
 ### Creating Admin Users
 1. **User Registration**: User must first create an account through the main chatbot application
@@ -205,12 +187,6 @@ chat_messages:
   SET user_role = 'student' 
   WHERE id = 'user_uuid_here';
   ```
-
-### Security Considerations
-- Admin role grants access to all user data in the analytics dashboard
-- Only assign admin role to trusted users
-- Regularly audit admin user list
-- Consider implementing role expiration for temporary admin access
 
 ## Performance Optimization
 - Adjust caching TTL in `@st.cache_data(ttl=300)`
