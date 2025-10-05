@@ -45,3 +45,23 @@ $$;
 
 -- Grant execute to authenticated role
 GRANT EXECUTE ON FUNCTION public.get_comprehensive_analytics_data() to authenticated;
+
+-- ===================================================================
+-- Testing the function
+
+-- 1. Check if function exists
+-- SELECT routine_name, routine_definition 
+-- FROM information_schema.routines 
+-- WHERE routine_name = 'get_comprehensive_analytics_data';
+
+-- 2. Test the function (as admin)
+-- SELECT * FROM public.get_comprehensive_analytics_data() LIMIT 10;
+
+-- 3. Verify it returns data across multiple users
+-- SELECT 
+--   user_email, 
+--   COUNT(DISTINCT chat_id) as chat_count,
+--   COUNT(message_id) as message_count
+-- FROM public.get_comprehensive_analytics_data()
+-- GROUP BY user_email
+-- ORDER BY message_count DESC;

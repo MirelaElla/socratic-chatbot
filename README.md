@@ -28,12 +28,22 @@ This is an AI chatbot that uses Socratic dialogue to help students understand th
 * Then run the command in cmd terminal `streamlit run app.py` (or `python -m streamlit run app.py`) to run the app on localhost.
 
 ## Database Setup
-Run the SQL commands in `database_setup.sql` in your Supabase SQL editor to set up the required tables:
-- `user_profiles`: Links to auth.users with user roles (admin, student, tester)
-- `chats`: Tracks individual chat sessions with mode selection (Sokrates/Aristoteles)
-- `chat_messages`: Stores individual messages within chat sessions
-- Includes feedback columns: `feedback_rating` (0/1 for thumbs down/up) and `feedback_text`
-- For e-mail verification, just enable the "Confirm email" option in Supabase Authentication settings (under SignIn/Providers). Currently, it is disabled to allow easy testing.
+Run the SQL commands in the following order in your Supabase SQL editor:
+
+1. **`database_setup.sql`**: Initial database schema setup
+   - `user_profiles`: Links to auth.users with user roles (admin, student, tester)
+   - `chats`: Tracks individual chat sessions with mode selection (Sokrates/Aristoteles)
+   - `chat_messages`: Stores individual messages within chat sessions
+   - Includes feedback columns: `feedback_rating` (0/1 for thumbs down/up) and `feedback_text`
+
+2. **`database_setup_RLS.sql`**: Security enhancements for multi-user sessions (improved session handling)
+   - Adds Row Level Security (RLS) policies to isolate user data
+   - Creates database trigger to automatically set `user_id` from JWT authentication
+   - Prevents cross-user data contamination in concurrent sessions
+   - (before this users could not chat concurrently, 04 Oct. 2025)
+
+For e-mail verification, just enable the "Confirm email" option in Supabase Authentication settings (under SignIn/Providers). Currently, it is disabled to allow easy testing.
+
 
 ## Models used
 * OpenAI's `gpt-4.1`

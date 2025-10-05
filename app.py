@@ -9,31 +9,59 @@ from streamlit_feedback import streamlit_feedback
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Initialize Supabase client for auth using Streamlit secrets
-@st.cache_resource
-def get_supabase_client():
+# Initialize Supabase client helpers - split "public" client from "authed" client
+def _make_raw_client():
+    """Create a fresh Supabase client (no auth state). Never cache auth state globally."""
     url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    key = st.secrets["SUPABASE_KEY"]  # anon key
     return create_client(url, key)
 
+def get_public_supabase_client():
+    """Optionally cache a stateless client for non-auth flows (signup, email redirects)."""
+    # Safe to cache because we never mutate its auth
+    @st.cache_resource(show_spinner=False)
+    def _cached():
+        return _make_raw_client()
+    return _cached()
+
 def get_authenticated_supabase_client():
-    """Get a Supabase client with current user authentication"""
-    supabase = get_supabase_client()
-    
-    # Check if we have a valid session
-    if st.session_state.get("authenticated", False):
-        try:
-            # Get the current user to verify the session is still valid
-            user = supabase.auth.get_user()
-            if user and user.user:
-                return supabase
-        except Exception as e:
-            print(f"Auth check failed: {e}")
-            
-    return None
+    """
+    Build a per-session client bound to the current user's tokens only.
+    Do NOT cache unless you key by the exact tokens.
+    """
+    access = st.session_state.get("sb_access_token")
+    refresh = st.session_state.get("sb_refresh_token")
+    if not access or not refresh:
+        return None
+
+    client_instance = _make_raw_client()
+
+    # Ensure both PostgREST and GoTrue are authorized for this instance only.
+    # (Both calls are safe even if library version varies.)
+    try:
+        client_instance.postgrest.auth(access)
+    except Exception:
+        pass
+    try:
+        client_instance.auth.set_session(access, refresh)
+    except Exception:
+        pass
+
+    return client_instance
 
 # Page configuration
 st.set_page_config(page_title="Chatbot Memory")
+
+def _clear_auth_state():
+    """Clear all authentication-related session state"""
+    st.session_state.authenticated = False
+    st.session_state.user_email = None
+    st.session_state.user_id = None
+    st.session_state.sb_access_token = None
+    st.session_state.sb_refresh_token = None
+    for k in ("messages", "message_ids", "current_chat_id"):
+        if k in st.session_state:
+            del st.session_state[k]
 
 def is_valid_email(email):
     """Check if email is valid"""
@@ -44,12 +72,18 @@ def is_valid_email(email):
 
 def authenticate_user(email, password):
     """Authenticate user with Supabase Auth"""
-    supabase = get_supabase_client()
+    supabase = get_public_supabase_client()
     try:
         response = supabase.auth.sign_in_with_password({
             "email": email,
             "password": password
         })
+        # Persist tokens to this Streamlit session only
+        st.session_state.sb_access_token = response.session.access_token
+        st.session_state.sb_refresh_token = response.session.refresh_token
+        st.session_state.authenticated = True
+        st.session_state.user_email = response.user.email
+        st.session_state.user_id = response.user.id
         return response.user
     except Exception as e:
         st.error(f"Login error: {e}")
@@ -62,15 +96,13 @@ def handle_auth_callback():
     
     # Check for different possible parameter combinations
     if "access_token" in query_params and "refresh_token" in query_params:
-        supabase = get_supabase_client()
+        # Do NOT mutate a shared client. Just stash tokens.
+        st.session_state.sb_access_token = query_params["access_token"]
+        st.session_state.sb_refresh_token = query_params["refresh_token"]
+
+        # Build a per-session client and fetch user
+        supabase = get_authenticated_supabase_client()
         try:
-            # Set the session with the tokens from URL
-            supabase.auth.set_session(
-                query_params["access_token"],
-                query_params["refresh_token"]
-            )
-            
-            # Get user info
             user = supabase.auth.get_user()
             if user and user.user:
                 st.session_state.authenticated = True
@@ -84,6 +116,7 @@ def handle_auth_callback():
                 
         except Exception as e:
             st.error(f"Fehler bei der E-Mail-Bestätigung: {e}")
+        return
     
     # Check for any confirmation-related parameters
     elif any(param in query_params for param in ["token_hash", "type", "confirmation_url", "email_confirmed"]):
@@ -98,7 +131,7 @@ def handle_auth_callback():
 
 def sign_up_user(email, password):
     """Sign up new user with Supabase Auth"""
-    supabase = get_supabase_client()
+    supabase = get_public_supabase_client()
     try:
         # Get the current app URL for redirect
         # For localhost development, Streamlit typically runs on port 8501
@@ -149,15 +182,7 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
     except Exception as e:
         if "JWT expired" in str(e) or "PGRST301" in str(e):
             st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
-            st.session_state.authenticated = False
-            st.session_state.user_email = None
-            st.session_state.user_id = None
-            if "messages" in st.session_state:
-                del st.session_state.messages
-            if "message_ids" in st.session_state:
-                del st.session_state.message_ids
-            if "current_chat_id" in st.session_state:
-                del st.session_state.current_chat_id
+            _clear_auth_state()
             st.rerun()
         else:
             st.error(f"Error saving feedback: {e}")
@@ -177,27 +202,15 @@ def create_new_chat(user_id, mode):
         return None
         
     try:
-        data = {
-            "user_id": str(user_id),
-            "mode": mode
-        }
-        
-        result = supabase.table("chats").insert(data).execute()
+        # DO NOT send user_id; DB will set user_id := auth.uid() (see SQL)
+        result = supabase.table("chats").insert({"mode": mode}).execute()
         if result.data and len(result.data) > 0:
             return result.data[0]["id"]
         return None
     except Exception as e:
         if "JWT expired" in str(e) or "PGRST301" in str(e):
             st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
-            st.session_state.authenticated = False
-            st.session_state.user_email = None
-            st.session_state.user_id = None
-            if "messages" in st.session_state:
-                del st.session_state.messages
-            if "message_ids" in st.session_state:
-                del st.session_state.message_ids
-            if "current_chat_id" in st.session_state:
-                del st.session_state.current_chat_id
+            _clear_auth_state()
             st.rerun()
         else:
             st.error(f"Error creating new chat: {e}")
@@ -232,16 +245,7 @@ def save_chat_message(chat_id, role, content):
         if "JWT expired" in str(e) or "PGRST301" in str(e):
             st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
             # Clear session and redirect to login
-            st.session_state.authenticated = False
-            st.session_state.user_email = None
-            st.session_state.user_id = None
-            st.session_state.user_id = None
-            if "messages" in st.session_state:
-                del st.session_state.messages
-            if "message_ids" in st.session_state:
-                del st.session_state.message_ids
-            if "current_chat_id" in st.session_state:
-                del st.session_state.current_chat_id
+            _clear_auth_state()
             st.rerun()
         else:
             st.error(f"Error saving message: {e}")
@@ -249,46 +253,43 @@ def save_chat_message(chat_id, role, content):
 
 def sign_out_user():
     """Sign out user from Supabase Auth"""
-    supabase = get_supabase_client()
+    # Build a per-session client so we only revoke THIS user's session.
+    supabase = get_authenticated_supabase_client()
     try:
-        supabase.auth.sign_out()
+        if supabase:
+            supabase.auth.sign_out()
     except Exception as e:
         st.error(f"Sign out error: {e}")
+    finally:
+        _clear_auth_state()
 
 def check_session_validity():
     """Check if the current session is still valid and refresh if needed"""
     if not st.session_state.get("authenticated", False):
         return False
     
-    supabase = get_supabase_client()
+    supabase = get_authenticated_supabase_client()
+    if not supabase:
+        _clear_auth_state()
+        return False
+    
     try:
         # Try to get current user - this will fail if token is expired
         user = supabase.auth.get_user()
         if user and user.user:
+            # Optional: detect identity drift
+            if st.session_state.get("user_id") and st.session_state["user_id"] != user.user.id:
+                # Someone's tokens changed under us—log out to be safe.
+                _clear_auth_state()
+                return False
             return True
         else:
             # Session is invalid, clear it
-            st.session_state.authenticated = False
-            st.session_state.user_email = None
-            st.session_state.user_id = None
-            if "messages" in st.session_state:
-                del st.session_state.messages
-            if "message_ids" in st.session_state:
-                del st.session_state.message_ids
-            if "current_chat_id" in st.session_state:
-                del st.session_state.current_chat_id
+            _clear_auth_state()
             return False
-    except Exception as e:
+    except Exception:
         # Session is invalid or expired
-        st.session_state.authenticated = False
-        st.session_state.user_email = None
-        st.session_state.user_id = None
-        if "messages" in st.session_state:
-            del st.session_state.messages
-        if "message_ids" in st.session_state:
-            del st.session_state.message_ids
-        if "current_chat_id" in st.session_state:
-            del st.session_state.current_chat_id
+        _clear_auth_state()
         return False
 
 def show_login():
@@ -381,9 +382,7 @@ def show_login():
                 if email and password and is_valid_email(email):
                     user = authenticate_user(email, password)
                     if user:
-                        st.session_state.authenticated = True
-                        st.session_state.user_email = email
-                        st.session_state.user_id = user.id
+                        # authenticate_user already sets all session state
                         # Clear any remaining URL parameters
                         st.query_params.clear()
                         st.success("✅ Erfolgreich angemeldet!")
@@ -495,15 +494,6 @@ def show_mode_selection():
         """)
         if st.button("Abmelden", type="secondary", use_container_width=True):
             sign_out_user()
-            st.session_state.authenticated = False
-            st.session_state.user_email = None
-            st.session_state.user_id = None
-            if "messages" in st.session_state:
-                del st.session_state.messages
-            if "message_ids" in st.session_state:
-                del st.session_state.message_ids
-            if "current_chat_id" in st.session_state:
-                del st.session_state.current_chat_id
             st.rerun()
     
     # Main content - Mode selection
@@ -613,15 +603,6 @@ def show_main_app():
         """)
         if st.button("Abmelden", type="secondary", use_container_width=True):
             sign_out_user()
-            st.session_state.authenticated = False
-            st.session_state.user_email = None
-            st.session_state.user_id = None
-            if "messages" in st.session_state:
-                del st.session_state.messages
-            if "message_ids" in st.session_state:
-                del st.session_state.message_ids
-            if "current_chat_id" in st.session_state:
-                del st.session_state.current_chat_id
             st.rerun()
     
     # App title
@@ -821,15 +802,7 @@ if not st.session_state.authenticated:
 # Check session validity before showing the app
 if st.session_state.authenticated:
     if not check_session_validity():
-        st.session_state.authenticated = False
-        st.session_state.user_email = None
-        st.session_state.user_id = None
-        if "messages" in st.session_state:
-            del st.session_state.messages
-        if "message_ids" in st.session_state:
-            del st.session_state.message_ids
-        if "current_chat_id" in st.session_state:
-            del st.session_state.current_chat_id
+        _clear_auth_state()
 
 # Show appropriate interface based on authentication
 if not st.session_state.authenticated:
