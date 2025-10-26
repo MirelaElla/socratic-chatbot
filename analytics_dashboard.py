@@ -525,7 +525,7 @@ def show_dashboard():
     
     # Usage Patterns
     st.header("📅 Usage Patterns")
-    st.info("**Course Session:** Activity on Saturday, 04 Oct. 2025, 10:15-13:00 reflects chat interactions during the course.")
+    st.info("**Course Session:** Activity on Saturday, 04 & 25 Oct. 2025, 10:15-13:00 reflects chat interactions during the course.")
     
     if usage_patterns and 'daily_usage' in usage_patterns:
         col1, col2 = st.columns(2)

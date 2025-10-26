@@ -18,9 +18,10 @@ This is an AI chatbot that uses Socratic dialogue to help students understand th
 - **Session Management**: Automatic session expiry handling for security
 
 ## Getting started
+* Use python version 3.13.2 (check current version with `python --version`)
 * You need an OpenAI API key saved in the ".env" file (OPENAI_API_KEY = "your-key-comes-here"). The .env file is git-ignored.
 * Set up Supabase project with authentication and database (see database_setup.sql)
-* Create environment in cmd terminal (if not done yet): `python -m venv venv`
+* Create environment in cmd terminal (if not done yet): `python -m venv venv` (`py -3.13 -m venv venv`)
 * Activate environment (on Windows): `venv\Scripts\activate`
 * To install all required packages run `pip install -r requirements.txt`
 --> if access denied due to managed laptops from work enter: `python -m pip install -r requirements.txt`
@@ -56,5 +57,7 @@ For e-mail verification, just enable the "Confirm email" option in Supabase Auth
 - [x] Analytics dashboard for feedback data (adjust to new DB structure, review SQL syntax)
 - [x] Improve system prompt for socrates chat to be more helpful (less fixed on the book)
 - [x] Registration issue: Outlook puts the confirmation email into quarantine. --> remove verification step
+- [ ] Add pagination for long DB queries (analytics_dashboard.py & analytics_function.sql)
+- [ ] Fix error message from 25.10.2025: Handle multiple concurrent users (cf. error_analysis.md)
 - [ ] Test email verification step on Fernuni email (supabase email has been whitelisted by Fernuni)
 - [ ] refactor app code for easier maintenance
