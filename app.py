@@ -34,6 +34,11 @@ def get_authenticated_supabase_client():
     if not access or not refresh:
         return None
 
+    cached_tokens = st.session_state.get("_authed_supabase_client_tokens")
+    cached_client = st.session_state.get("_authed_supabase_client")
+    if cached_client and cached_tokens == (access, refresh):
+        return cached_client
+
     client_instance = _make_raw_client()
 
     # Ensure both PostgREST and GoTrue are authorized for this instance only.
@@ -47,6 +52,8 @@ def get_authenticated_supabase_client():
     except Exception:
         pass
 
+    st.session_state._authed_supabase_client = client_instance
+    st.session_state._authed_supabase_client_tokens = (access, refresh)
     return client_instance
 
 # Page configuration
@@ -59,6 +66,8 @@ def _clear_auth_state():
     st.session_state.user_id = None
     st.session_state.sb_access_token = None
     st.session_state.sb_refresh_token = None
+    st.session_state.pop("_authed_supabase_client", None)
+    st.session_state.pop("_authed_supabase_client_tokens", None)
     for k in ("messages", "message_ids", "current_chat_id"):
         if k in st.session_state:
             del st.session_state[k]
