@@ -353,9 +353,8 @@ def show_login():
         with st.expander("⚙️ Debug"):
             try:
                 st.write("TTL:", st.get_option("server.disconnectedSessionTTL"))
-                st.write("Ping:", st.get_option("server.websocketPingInterval"))
             except Exception as e:
-                st.write("TTL/Ping options unavailable:", e)
+                st.write("TTL option unavailable:", e)
     
     # Main content
     st.title("🔐 Anmeldung erforderlich")
@@ -517,9 +516,8 @@ def show_mode_selection():
         with st.expander("⚙️ Debug"):
             try:
                 st.write("TTL:", st.get_option("server.disconnectedSessionTTL"))
-                st.write("Ping:", st.get_option("server.websocketPingInterval"))
             except Exception as e:
-                st.write("TTL/Ping options unavailable:", e)
+                st.write("TTL option unavailable:", e)
     
     # Main content - Mode selection
     st.title("🎯 Chat-Modus wählen")
@@ -634,9 +632,8 @@ def show_main_app():
         with st.expander("⚙️ Debug"):
             try:
                 st.write("TTL:", st.get_option("server.disconnectedSessionTTL"))
-                st.write("Ping:", st.get_option("server.websocketPingInterval"))
             except Exception as e:
-                st.write("TTL/Ping options unavailable:", e)
+                st.write("TTL option unavailable:", e)
     
     # App title
     st.title(f"{st.session_state.chat_mode} Chatbot")

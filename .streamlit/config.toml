@@ -1,7 +1,3 @@
 [server]
 # keep disconnected sessions 30 minutes instead of 2 minutes
 disconnectedSessionTTL = 1800
-
-# optional: keep some proxy setups from dropping idle websockets
-# (try 30–60 seconds if your users are behind strict proxies)
-websocketPingInterval = 30
