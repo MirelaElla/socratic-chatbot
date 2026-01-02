@@ -348,6 +348,14 @@ def show_login():
 
             **Avertissement**: Nous ne garantissons pas l'exactitude des réponses du chatbot.
             """)
+
+        st.divider()
+        with st.expander("⚙️ Debug"):
+            try:
+                st.write("TTL:", st.get_option("server.disconnectedSessionTTL"))
+                st.write("Ping:", st.get_option("server.websocketPingInterval"))
+            except Exception as e:
+                st.write("TTL/Ping options unavailable:", e)
     
     # Main content
     st.title("🔐 Anmeldung erforderlich")
@@ -504,6 +512,14 @@ def show_mode_selection():
         if st.button("Abmelden", type="secondary", use_container_width=True):
             sign_out_user()
             st.rerun()
+
+        st.divider()
+        with st.expander("⚙️ Debug"):
+            try:
+                st.write("TTL:", st.get_option("server.disconnectedSessionTTL"))
+                st.write("Ping:", st.get_option("server.websocketPingInterval"))
+            except Exception as e:
+                st.write("TTL/Ping options unavailable:", e)
     
     # Main content - Mode selection
     st.title("🎯 Chat-Modus wählen")
@@ -613,6 +629,14 @@ def show_main_app():
         if st.button("Abmelden", type="secondary", use_container_width=True):
             sign_out_user()
             st.rerun()
+
+        st.divider()
+        with st.expander("⚙️ Debug"):
+            try:
+                st.write("TTL:", st.get_option("server.disconnectedSessionTTL"))
+                st.write("Ping:", st.get_option("server.websocketPingInterval"))
+            except Exception as e:
+                st.write("TTL/Ping options unavailable:", e)
     
     # App title
     st.title(f"{st.session_state.chat_mode} Chatbot")
