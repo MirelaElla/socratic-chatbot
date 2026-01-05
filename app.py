@@ -2,6 +2,7 @@ import streamlit as st
 from openai import OpenAI
 import os
 import re
+import time
 from dotenv import load_dotenv
 from supabase import create_client
 from streamlit_feedback import streamlit_feedback
@@ -17,12 +18,13 @@ def _make_raw_client():
     return create_client(url, key)
 
 def get_public_supabase_client():
-    """Optionally cache a stateless client for non-auth flows (signup, email redirects)."""
-    # Safe to cache because we never mutate its auth
-    @st.cache_resource(show_spinner=False)
-    def _cached():
-        return _make_raw_client()
-    return _cached()
+    """Return a fresh Supabase client (anon key).
+
+    Important: Do not cache this process-wide if you call any auth-mutating
+    methods (e.g., sign_in_with_password/sign_up), because the client may hold
+    auth state internally and can break concurrent multi-user sessions.
+    """
+    return _make_raw_client()
 
 def get_authenticated_supabase_client():
     """
@@ -68,6 +70,7 @@ def _clear_auth_state():
     st.session_state.sb_refresh_token = None
     st.session_state.pop("_authed_supabase_client", None)
     st.session_state.pop("_authed_supabase_client_tokens", None)
+    st.session_state.pop("_sb_last_user_check_ok_ts", None)
     for k in ("messages", "message_ids", "current_chat_id"):
         if k in st.session_state:
             del st.session_state[k]
@@ -160,11 +163,6 @@ def sign_up_user(email, password):
 
 def save_feedback(message_id, feedback_rating, feedback_text=None):
     """Save user feedback for an assistant message"""
-    if not check_session_validity():
-        st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
-        st.rerun()
-        return None
-    
     supabase = get_authenticated_supabase_client()
     if not supabase:
         st.error("Authentifizierung fehlgeschlagen. Bitte melden Sie sich erneut an.")
@@ -200,11 +198,6 @@ def save_feedback(message_id, feedback_rating, feedback_text=None):
 
 def create_new_chat(user_id, mode):
     """Create a new chat session"""
-    if not check_session_validity():
-        st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
-        st.rerun()
-        return None
-    
     supabase = get_authenticated_supabase_client()
     if not supabase:
         st.error("Authentifizierung fehlgeschlagen. Bitte melden Sie sich erneut an.")
@@ -227,11 +220,6 @@ def create_new_chat(user_id, mode):
 
 def save_chat_message(chat_id, role, content):
     """Save chat message to the new chat_messages table"""
-    if not check_session_validity():
-        st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
-        st.rerun()
-        return None
-    
     supabase = get_authenticated_supabase_client()
     if not supabase:
         st.error("Authentifizierung fehlgeschlagen. Bitte melden Sie sich erneut an.")
@@ -276,11 +264,47 @@ def check_session_validity():
     """Check if the current session is still valid and refresh if needed"""
     if not st.session_state.get("authenticated", False):
         return False
+
+    # If tokens are missing, the session cannot be valid.
+    access = st.session_state.get("sb_access_token")
+    refresh = st.session_state.get("sb_refresh_token")
+    if not access or not refresh:
+        _clear_auth_state()
+        return False
+
+    # Throttle calls to Supabase Auth.get_user() to reduce flakiness under
+    # unstable networks and avoid excessive backend calls during reruns.
+    now = time.monotonic()
+    last_ok = st.session_state.get("_sb_last_user_check_ok_ts")
+    if last_ok and (now - last_ok) < 30:
+        return True
     
     supabase = get_authenticated_supabase_client()
     if not supabase:
         _clear_auth_state()
         return False
+
+    def _is_definite_auth_error(exc: Exception) -> bool:
+        msg = str(exc).lower()
+        markers = [
+            "jwt expired",
+            "invalid jwt",
+            "invalid token",
+            "token has expired",
+            "token is expired",
+            "refresh token not found",
+            "invalid refresh token",
+            "pgrst301",
+            "status code 401",
+            "status code: 401",
+            "status_code=401",
+            "status code 403",
+            "status code: 403",
+            "status_code=403",
+            "unauthorized",
+            "forbidden",
+        ]
+        return any(m in msg for m in markers)
     
     try:
         # Try to get current user - this will fail if token is expired
@@ -291,15 +315,19 @@ def check_session_validity():
                 # Someone's tokens changed under us—log out to be safe.
                 _clear_auth_state()
                 return False
+            st.session_state["_sb_last_user_check_ok_ts"] = now
             return True
         else:
             # Session is invalid, clear it
             _clear_auth_state()
             return False
-    except Exception:
-        # Session is invalid or expired
-        _clear_auth_state()
-        return False
+    except Exception as e:
+        # If this is clearly an auth failure, log out. Otherwise, treat it as a
+        # transient network/backend issue and do NOT clear session state.
+        if _is_definite_auth_error(e):
+            _clear_auth_state()
+            return False
+        return True
 
 def show_login():
     """Display login form"""
@@ -451,12 +479,6 @@ def show_login():
 
 def show_mode_selection():
     """Display mode selection interface"""
-    # Check session validity at the start
-    if not check_session_validity():
-        st.error("Ihre Sitzung ist abgelaufen. Sie werden zur Anmeldung weitergeleitet.")
-        st.rerun()
-        return
-    
     # Sidebar with user info
     with st.sidebar:
         st.image("assets/Unidistance_Logo_couleur_RVB.png", width=200)
@@ -574,12 +596,6 @@ def show_mode_selection():
 
 def show_main_app():
     """Display the main chatbot application"""
-    # Check session validity at the start of main app
-    if not check_session_validity():
-        st.error("Ihre Sitzung ist abgelaufen. Sie werden zur Anmeldung weitergeleitet.")
-        st.rerun()
-        return
-    
     # Check if we have a current chat session
     if "current_chat_id" not in st.session_state or st.session_state.current_chat_id is None:
         # No chat session, show mode selection
@@ -719,12 +735,6 @@ def show_main_app():
 
     # Handle user input
     if user_input and not st.session_state.processing_response:
-        # Check session validity before processing the message
-        if not check_session_validity():
-            st.error("Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.")
-            st.rerun()
-            return
-            
         # Add user message immediately and rerun to display it
         st.session_state.messages.append({"role": "user", "content": user_input})
         
