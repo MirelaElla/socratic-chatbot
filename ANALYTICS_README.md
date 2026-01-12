@@ -2,6 +2,7 @@
 
 ## Overview
 The analytics dashboard provides comprehensive insights into the Socratic Chatbot usage, including user engagement, chat mode preferences, feedback ratings, and usage patterns.
+The dashboard now paginates the RPC results to avoid truncation with many chat messages.
 
 ## Features
 
@@ -191,4 +192,3 @@ Can be managed in Supabase UI directly or with sql commands.
 ## Performance Optimization
 - Adjust caching TTL in `@st.cache_data(ttl=300)`
 - Add data filtering options
-- Implement pagination for large datasets

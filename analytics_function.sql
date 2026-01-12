@@ -40,7 +40,7 @@ FROM auth.users au
 LEFT JOIN public.user_profiles up ON up.id = au.id
 LEFT JOIN public.chats ch ON ch.user_id = au.id
 LEFT JOIN public.chat_messages cm ON cm.chat_id = ch.id
-ORDER BY cm.created_at ASC NULLS LAST;
+ORDER BY cm.created_at ASC NULLS LAST, cm.id ASC NULLS LAST;
 $$;
 
 -- Grant execute to authenticated role

@@ -58,6 +58,6 @@ For e-mail verification, just enable the "Confirm email" option in Supabase Auth
 - [x] Improve system prompt for socrates chat to be more helpful (less fixed on the book)
 - [x] Registration issue: Outlook puts the confirmation email into quarantine. --> remove verification step
 - [x] Handle multiple concurrent users
-- [ ] Add pagination for long DB queries (analytics_dashboard.py & analytics_function.sql)
+- [x] Add pagination for long DB queries (analytics_dashboard.py & analytics_function.sql)
 - [ ] Test email verification step on Fernuni email (supabase email has been whitelisted by Fernuni)
 - [ ] refactor app code for easier maintenance

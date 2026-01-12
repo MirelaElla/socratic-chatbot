@@ -21,16 +21,50 @@ st.set_page_config(
 )
 
 # Initialize Supabase client
-@st.cache_resource
-def get_supabase_client():
+def _make_raw_client():
+    """Create a fresh Supabase client (no auth state)."""
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
+def get_public_supabase_client():
+    """Return a fresh Supabase client (anon key).
+
+    Do not cache this if you call auth-mutating methods, because the client
+    can hold auth state internally and leak it across sessions.
+    """
+    return _make_raw_client()
+
+def get_authenticated_supabase_client():
+    """Build a per-session Supabase client bound to the current admin tokens."""
+    access = st.session_state.get("admin_sb_access_token")
+    refresh = st.session_state.get("admin_sb_refresh_token")
+    if not access or not refresh:
+        return None
+
+    cached_tokens = st.session_state.get("_admin_authed_supabase_client_tokens")
+    cached_client = st.session_state.get("_admin_authed_supabase_client")
+    if cached_client and cached_tokens == (access, refresh):
+        return cached_client
+
+    client_instance = _make_raw_client()
+    try:
+        client_instance.postgrest.auth(access)
+    except Exception:
+        pass
+    try:
+        client_instance.auth.set_session(access, refresh)
+    except Exception:
+        pass
+
+    st.session_state._admin_authed_supabase_client = client_instance
+    st.session_state._admin_authed_supabase_client_tokens = (access, refresh)
+    return client_instance
+
 def check_admin_role(user_id):
     """Check if user has admin role in the user_profiles table"""
     try:
-        supabase = get_supabase_client()
+        supabase = get_authenticated_supabase_client() or get_public_supabase_client()
         response = supabase.table("user_profiles").select("user_role").eq("id", user_id).execute()
         
         if response.data and len(response.data) > 0:
@@ -43,13 +77,17 @@ def check_admin_role(user_id):
 def authenticate_admin(email, password):
     """Authenticate admin users with proper role validation"""
     try:
-        supabase = get_supabase_client()
+        supabase = get_public_supabase_client()
         response = supabase.auth.sign_in_with_password({
             "email": email,
             "password": password
         })
         
-        if response.user:
+        if response.user and response.session:
+            # Persist admin tokens to this Streamlit session only
+            st.session_state.admin_sb_access_token = response.session.access_token
+            st.session_state.admin_sb_refresh_token = response.session.refresh_token
+
             # Check if user has admin role in user_profiles table
             if check_admin_role(response.user.id):
                 return response.user
@@ -65,17 +103,48 @@ def authenticate_admin(email, password):
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def fetch_comprehensive_data():
     """Fetch all data in one comprehensive query"""
-    supabase = get_supabase_client()
+    supabase = get_authenticated_supabase_client() or get_public_supabase_client()
     
     try:
-        # Execute the RPC function to get comprehensive analytics data
-        response = supabase.rpc('get_comprehensive_analytics_data').execute()
-        
-        if response.data:
-            df = pd.DataFrame(response.data)
-        else:
+        # IMPORTANT: Supabase/PostgREST commonly enforces a max-rows limit.
+        # If the dataset is larger than that limit, a single RPC call will be
+        # truncated (often yielding only older rows). Paginate to fetch all.
+        page_size = 1000
+        max_pages = 500  # safety guard
+
+        all_rows = []
+        offset = 0
+        pagination_supported = True
+        for _ in range(max_pages):
+            query = supabase.rpc('get_comprehensive_analytics_data')
+            if pagination_supported:
+                try:
+                    response = query.range(offset, offset + page_size - 1).execute()
+                except Exception:
+                    # Some client versions don't support range() on RPC builders.
+                    pagination_supported = False
+                    response = query.execute()
+            else:
+                response = query.execute()
+
+            batch = response.data or []
+            if not batch:
+                break
+            all_rows.extend(batch)
+
+            # If we couldn't paginate, avoid looping and duplicating the same slice.
+            if not pagination_supported:
+                break
+
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        if not all_rows:
             st.error("No data returned from analytics function. Please contact administrator.")
             return pd.DataFrame()
+
+        df = pd.DataFrame(all_rows)
         
         # Data preprocessing
         if not df.empty:
@@ -83,11 +152,16 @@ def fetch_comprehensive_data():
             timestamp_columns = ['profile_created_at', 'chat_created_at', 'message_created_at']
             for col in timestamp_columns:
                 if col in df.columns:
-                    df[col] = pd.to_datetime(df[col])
+                    # Force UTC-aware timestamps; errors become NaT instead of crashing
+                    df[col] = pd.to_datetime(df[col], utc=True, errors='coerce')
             
             # Create local timezone column for message timestamps
             if 'message_created_at' in df.columns:
-                df['message_created_at_local'] = pd.to_datetime(df['message_created_at']).dt.tz_convert('Europe/Zurich').dt.tz_localize(None)
+                df['message_created_at_local'] = (
+                    df['message_created_at']
+                    .dt.tz_convert('Europe/Zurich')
+                    .dt.tz_localize(None)
+                )
         
         return df
         
@@ -383,6 +457,10 @@ def show_dashboard():
     if st.sidebar.button("🚪 Logout"):
         st.session_state.admin_authenticated = False
         st.session_state.admin_email = None
+        st.session_state.admin_sb_access_token = None
+        st.session_state.admin_sb_refresh_token = None
+        st.session_state.pop("_admin_authed_supabase_client", None)
+        st.session_state.pop("_admin_authed_supabase_client_tokens", None)
         if 'admin_user_id' in st.session_state:
             st.session_state.admin_user_id = None
         st.rerun()
@@ -821,6 +899,10 @@ def main():
     # Initialize session state
     if "admin_authenticated" not in st.session_state:
         st.session_state.admin_authenticated = False
+    if "admin_sb_access_token" not in st.session_state:
+        st.session_state.admin_sb_access_token = None
+    if "admin_sb_refresh_token" not in st.session_state:
+        st.session_state.admin_sb_refresh_token = None
     
     # Show appropriate interface
     if not st.session_state.admin_authenticated:
