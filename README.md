@@ -11,6 +11,10 @@ This is an AI chatbot that uses Socratic dialogue to help students understand th
 - **Two Chat Modes:**
   - **Sokrates**: Socratic dialogue with guiding questions to encourage self-discovery
   - **Aristoteles**: Direct, informative answers to your questions
+- **Audio Input**: Speak your questions using the microphone button
+  - Toggle between text and audio input modes with the 🎤/⌨️ button
+  - Speech-to-text transcription using OpenAI's API
+  - Text-based responses
 - **User Authentication**: Secure login with institutional email addresses (@unidistance.ch, @fernuni.ch)
 - **Chat History Storage**: Conversations are saved to database for analytics and feedback purposes
 - **Fresh Start**: Each session begins with a clean chat interface (no previous conversation history shown)
